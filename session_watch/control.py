@@ -2,8 +2,10 @@
 import argparse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 import json
+import re
+from http.cookies import SimpleCookie
 import os
 from pathlib import Path
 import secrets
@@ -19,6 +21,7 @@ from .alerts import alert_kind, play_alert
 from .core import atomic_write
 from .panel import PAGE
 from . import pager, alert_store
+from .tunnel import Tunnel
 
 
 class Controller:
@@ -45,6 +48,7 @@ class Controller:
                 'stage1': (legacy.get('review') or {}).get('stage1', {}),
                 'invite': (legacy.get('review') or {}).get('stage2', {})})
         self.sync_alerts()
+        self.tunnel = Tunnel(self.root)
 
     def sync_alerts(self):
         records = alert_store.read(self.root)
@@ -52,7 +56,7 @@ class Controller:
         if alert_store.paused(self.root):
             opened = [a for a in opened if a['category'] == 'auth_needed' and not a.get('silenced_at')]
         item = opened[-1] if opened else None
-        self.active = ({'id': item['id'], 'kind': 'login' if item['category'] == 'auth_needed' else 'change',
+        self.active = ({'id': item['id'], 'category': item['category'], 'kind': 'login' if item['category'] == 'auth_needed' else 'change',
             'version': int(datetime.fromisoformat(item['updated_at']).timestamp() * 1000000),
             'since': item['created_at'], 'count': len(opened),
             'invite_classification': 'possible_invite' if item['category'] == 'review_needed' else item['stage2'].get('classification'),
@@ -99,14 +103,20 @@ class Controller:
         self.wake.set()
 
     def audio_loop(self):
+        audio_index = 0
         while not self.closed.is_set():
             self.wake.clear()
             with self.lock:
-                self.sync_alerts()
-                active = dict(self.active) if self.active else None
+                records = self.sync_alerts()
+                pending = [a for a in records if a['status'] == 'open']
+                if alert_store.paused(self.root):
+                    pending = [a for a in pending if a['category'] == 'auth_needed' and not a.get('silenced_at')]
+                categories = list(dict.fromkeys(a['category'] for a in reversed(pending)))
+                active = next((a for a in reversed(pending) if a['category'] == categories[audio_index % len(categories)]), None) if categories else None
+                audio_index += 1
             if active:
-                result = {'classification': 'auth_expired' if active['kind'] == 'login' else 'content_change',
-                          'invite': {'classification': active.get('invite_classification') or 'possible_invite'}}
+                result = {'classification': 'auth_expired' if active['category'] == 'auth_needed' else 'content_change',
+                          'alert_category': active['category'], 'invite': active['stage2']}
                 settings = {**self.config, 'alerts': {**self.config.get('alerts', {}), 'persistent': False, 'invite_only': False}}
                 played = play_alert(settings, result)
                 with self.lock:
@@ -205,6 +215,7 @@ class Controller:
             self.message = ''
 
     def stop_app(self):
+        self.tunnel.stop()
         self.closed.set()
         self.wake.set()
         with self.actions:
@@ -294,7 +305,7 @@ class Controller:
                 indicator = {'state': 'idle', 'label': 'Signed out' if (self.root / 'signed-out').exists() else 'Paused'}
             return {'alerts': [] if (self.root / 'signed-out').exists() else list(reversed(inbox)), 'auth_paused': alert_store.paused(self.root), 'alert': self.active, 'message': self.message, 'screenshot': latest,
                     'attention': self.attention, 'indicator': indicator,
-                    'session': self.session_info(), 'analysis': analysis, 'pager': pager_info, 'signed_out': (self.root / 'signed-out').exists(),
+                    'tunnel': self.tunnel.status(), 'session': self.session_info(), 'analysis': analysis, 'pager': pager_info, 'signed_out': (self.root / 'signed-out').exists(),
                     'timing': timing, 'server_time': time.time(),
                     'monitoring': monitoring, 'login_open': login_open}
 
@@ -312,22 +323,62 @@ def handler_for(controller, token):
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
+            self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')
             self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.end_headers()
             self.wfile.write(body)
 
-        def valid_host(self):
+        def local_request(self):
             return self.headers.get('Host') == f'127.0.0.1:{self.server.server_port}'
+
+        def valid_host(self):
+            host = urlsplit(controller.tunnel.status().get('url') or '').netloc
+            return self.local_request() or bool(host and self.headers.get('Host') == host)
+
+        def allowed(self):
+            if self.local_request():
+                return True
+            cookie = SimpleCookie()
+            try:
+                cookie.load(self.headers.get('Cookie', ''))
+            except Exception:
+                return False
+            value = cookie.get('sw-access')
+            return bool(value and secrets.compare_digest(value.value, controller.tunnel.secret))
 
         def do_GET(self):
             if not self.valid_host():
                 return self.reply({'error': 'Invalid host'}, 403)
-            if self.path == '/':
+            parsed = urlsplit(self.path)
+            access = parse_qs(parsed.query).get('access', [''])[0]
+            if not self.local_request() and parsed.path == '/' and access and secrets.compare_digest(access, controller.tunnel.secret):
+                self.send_response(303)
+                self.send_header('Location', '/')
+                self.send_header('Set-Cookie', 'sw-access=' + controller.tunnel.secret + '; Path=/; HttpOnly; Secure; SameSite=Strict')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Referrer-Policy', 'no-referrer')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            if not self.allowed():
+                return self.reply({'error': 'Open the private access link from Setup.'}, 403)
+            if parsed.path == '/':
                 return self.reply(PAGE.replace('__TOKEN__', token), content_type='text/html; charset=utf-8')
-            if self.path == '/status':
+            if parsed.path == '/status':
                 return self.reply(controller.status())
+            if parsed.path.startswith('/alert-image/'):
+                if (controller.root / 'signed-out').exists():
+                    return self.reply({'error': 'Sign in to view alert images'}, 403)
+                match = re.fullmatch(r'/alert-image/([A-Za-z0-9_-]{1,128})/(after|diff)\.png', parsed.path)
+                if not match:
+                    return self.reply({'error': 'Not found'}, 404)
+                try:
+                    data = (controller.root / 'alert-media' / match[1] / (match[2] + '.png')).read_bytes()
+                except FileNotFoundError:
+                    return self.reply({'error': 'No image saved for this alert'}, 404)
+                return self.reply(data, content_type='image/png')
             if urlsplit(self.path).path == '/screenshot/latest.png':
                 if (controller.root / 'signed-out').exists():
                     return self.reply({'error': 'Sign in to view dashboard screenshots'}, 403)
@@ -347,8 +398,8 @@ def handler_for(controller, token):
             except ValueError as exc:
                 return self.reply({'error': str(exc)}, 400)
             origin = self.headers.get('Origin')
-            expected = f'http://127.0.0.1:{self.server.server_port}'
-            if (not self.valid_host() or self.headers.get('X-Session-Watch-Token') != token
+            expected = f'http://127.0.0.1:{self.server.server_port}' if self.local_request() else controller.tunnel.status().get('url')
+            if (not self.valid_host() or not self.allowed() or self.headers.get('X-Session-Watch-Token') != token
                     or (origin is not None and origin != expected)):
                 return self.reply({'error': 'Forbidden'}, 403)
             try:
@@ -356,7 +407,16 @@ def handler_for(controller, token):
                 if not isinstance(data, dict):
                     raise ValueError('Expected a JSON object')
                 if self.path == '/event':
+                    if not self.local_request():
+                        return self.reply({'error': 'Local monitor only'}, 403)
                     controller.notify(data)
+                elif self.path == '/tunnel':
+                    if data.get('action') == 'start':
+                        controller.tunnel.start(self.server.server_port)
+                    elif data.get('action') == 'stop':
+                        controller.tunnel.stop()
+                    else:
+                        raise ValueError('Choose start or stop.')
                 elif self.path == '/dismiss':
                     controller.dismiss(data.get('id'), data.get('revision'))
                 elif self.path == '/acknowledge':
@@ -408,6 +468,7 @@ def main():
         try:
             server.serve_forever()
         finally:
+            controller.tunnel.stop()
             controller.closed.set(); controller.wake.set(); server.server_close()
             for process in [controller.worker, controller.login]:
                 if process and process.poll() is None:

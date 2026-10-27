@@ -1,6 +1,7 @@
 """Private, durable alert inbox shared by the watcher and control service."""
 from datetime import datetime, timezone
 import json
+import re
 import uuid
 from filelock import FileLock
 from .core import atomic_write
@@ -35,6 +36,8 @@ def record(root, result):
         if auth and paused(root):
             return json.loads((root / 'auth-required.json').read_text())['alert_id']
         event_id = result.get('alert_id') or uuid.uuid4().hex
+        if not isinstance(event_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', event_id):
+            raise ValueError('Invalid alert ID.')
         item = next((a for a in records if a['id'] == event_id), None)
         if item and result.get('checking_invite') and item['stage2'].get('classification') not in {None, 'not_run'}:
             return event_id
@@ -45,6 +48,17 @@ def record(root, result):
         if item is None:
             item = {'id': event_id, 'created_at': stamp, 'status': 'open', 'dismissed_at': None,
                     'revision': 0, 'history': []}
+            if not auth and result.get('captured_at'):
+                images = {}
+                for name, source in [('after', 'latest.png'), ('diff', 'latest-diff.png')]:
+                    path = root / 'screenshots' / source
+                    if path.exists():
+                        from .visual import atomic_write_bytes
+                        folder = root / 'alert-media' / event_id
+                        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        atomic_write_bytes(folder / (name + '.png'), path.read_bytes())
+                        images[name] = '/alert-image/' + event_id + '/' + name + '.png'
+                item['images'] = images
             records.append(item)
         elif item['category'] != 'interview_invite' and confirmed:
             # A later positive verdict is new actionable information, even if the initial change was seen.

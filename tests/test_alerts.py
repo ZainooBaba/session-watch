@@ -44,3 +44,15 @@ def test_confirmed_changes_alert_even_with_legacy_invite_only_setting():
     assert alert_kind({'classification':'uncertain','invite':{'classification':'possible_invite'}},invite_only=True)=='change'
     assert alert_kind({'classification':'content_change','invite':{'classification':'not_interview_invite'}},invite_only=True) == 'change'
     assert alert_kind({'classification':'auth_expired'},invite_only=True)=='login'
+
+
+def test_each_alert_category_uses_its_own_sound(monkeypatch):
+    monkeypatch.setattr('session_watch.alerts.sys.platform','darwin')
+    player=Mock();monkeypatch.setattr(subprocess,'run',player)
+    categories={'auth_needed':'Basso','change':'Glass','review_needed':'Ping','interview_invite':'Hero'}
+    sounds=[]
+    for category,expected in categories.items():
+        result=play_alert({'alerts':{'enabled':True}}, {'classification':'auth_expired' if category=='auth_needed' else 'content_change','alert_category':category})
+        assert result['sound']==expected
+        sounds.append(result['sound'])
+    assert len(set(sounds))==len(categories)

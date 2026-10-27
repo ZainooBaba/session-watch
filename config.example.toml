@@ -39,6 +39,8 @@ persistent = true
 repeat_seconds = 8
 login_sound = "Basso"
 change_sound = "Glass"
+review_sound = "Ping"
+invite_sound = "Hero"
 
 [invites]
 enabled = true

@@ -157,3 +157,34 @@ def test_failed_signin_preserves_open_auth_alert(tmp_path, monkeypatch):
         controller.save_login()
     assert controller.status()['alerts'][0]['status'] == 'open'
     assert controller.status()['auth_paused']
+
+
+def test_alert_images_are_frozen_and_served_without_path_traversal(tmp_path):
+    import httpx
+    import threading
+    from http.server import ThreadingHTTPServer
+    from session_watch.control import handler_for
+    config=tmp_path/'config.toml';config.write_text('')
+    controller=Controller(config);root=controller.root
+    shots=root/'screenshots';shots.mkdir()
+    (shots/'latest.png').write_bytes(b'original capture')
+    (shots/'latest-diff.png').write_bytes(b'original diff')
+    event={**change(), 'captured_at':'2026-10-27T16:00:00+00:00'}
+    controller.notify(event)
+    (shots/'latest.png').write_bytes(b'later capture')
+    (shots/'latest-diff.png').write_bytes(b'later diff')
+    controller.notify({**event,'invite':{'classification':'not_interview_invite','reason':'Not an invite'}})
+    item=controller.status()['alerts'][0]
+    assert (root/'alert-media'/item['id']/'after.png').read_bytes()==b'original capture'
+    server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(controller,'test'))
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    try:
+        with httpx.Client(trust_env=False) as client:
+            assert client.get(base+item['images']['after']).content==b'original capture'
+            assert client.get(base+item['images']['diff']).content==b'original diff'
+            assert client.get(base+'/alert-image/%2e%2e/storage.json').status_code==404
+            controller.sign_out()
+            assert client.get(base+item['images']['after']).status_code==403
+    finally:
+        server.shutdown();server.server_close();thread.join()

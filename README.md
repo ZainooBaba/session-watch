@@ -65,16 +65,28 @@ In the local page, expand **PagerDuty setup**, paste that key, and choose **Enab
 
 For headless configuration, `[pager] enabled = true` can use the `PAGERDUTY_ROUTING_KEY` environment variable. No key is bundled with the project.
 
+Each new change alert keeps its own screenshot and highlighted pixel diff. Select **Screenshot** or **Diff** in the alert to view them, and select the image for full size. These images do not change when a later capture arrives. Auth alerts and older alerts without saved images display an availability message.
+
 ## Compact interface
 
 The control page fits the viewport with Home, Dashboard, Alerts, and Setup tabs. Home is the default view: new alerts sit beside a compact screenshot preview, stacking on narrow screens. The screenshot scales to available space. Alerts can be filtered to **New** or **All**, with one alert per page and paginated explanations. **Setup** holds sign-in, sign-out, Stop App, and PagerDuty settings. Auth Needed alerts also offer sign-in directly: opening sign-in silences the sound, while successful verification resolves the alert and removes it from New.
+
+## Remote access tunnel
+
+In **Setup → Tunnel**, choose **Start Tunnel** to run `cloudflared tunnel --url http://127.0.0.1:8765`. Install cloudflared first if needed (`brew install cloudflared` on macOS). The app displays a private access link once Cloudflare assigns its temporary address. Open that link on another device; it establishes an authenticated browser cookie. The plain tunnel URL cannot read the dashboard or controls without the private link. The existing action token and same-origin checks also protect writes.
+
+**Stop Tunnel** terminates the tunnel owned by this app and invalidates its private link. Starting it again creates a fresh link. Stopping Session Watch also closes the tunnel. It does not terminate unrelated cloudflared processes. Quick Tunnel behavior is documented by [Cloudflare](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
 
 ## Sounds and status
 
 Confirmed dashboard changes create alerts even when the second check rules out a new invitation. The legacy `invite_only` setting no longer suppresses these alerts. Local sounds repeat every eight seconds until the relevant objects are dismissed:
 
 - **Basso three times:** human sign-in/access review required.
-- **Glass twice:** confirmed dashboard change, possible invitation, or confirmed new invitation. PagerDuty requires both checks to pass.
+- **Glass twice:** confirmed dashboard change.
+- **Ping twice:** possible invitation or a change needing review.
+- **Hero three times:** confirmed new interview invitation. PagerDuty still requires both checks to pass.
+
+When several types are open, their sounds rotate. Auth Needed takes priority while the session is paused.
 
 On macOS, `alerts.volume = 1.0` uses maximum afplay playback level, subject to your system output volume and mute setting. Sound failures are logged and do not stop monitoring. If the supervisor is unavailable, the watcher falls back to one sound sequence and reports that persistent playback could not be established. Audio currently supports macOS only.
 

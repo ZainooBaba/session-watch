@@ -46,7 +46,7 @@ Dismissal targets the exact object and revision shown to the user. If the object
 
 ## Sounds and state
 
-Sign-in uses Basso; changes and invitations use Glass. Sound repeats while an applicable open object remains. Auth Needed takes priority and suspends sounds for other objects until sign-in is restored. Audio failure or disabled audio must not prevent an alert object from being saved.
+Each alert category uses a distinct sound: Auth Needed uses Basso, Dashboard change uses Glass, Change needs review uses Ping, and New interview invite uses Hero. Multiple open categories rotate their sounds. Sound repeats while an applicable open object remains. Auth Needed takes priority and suspends sounds for other objects until sign-in is restored. Audio failure or disabled audio must not prevent an alert object from being saved.
 
 The indicator remains green while authentication is required, red while a change/review/invite object is open, pulsing yellow while monitoring with no open actionable alerts, and gray while idle. A new screenshot never dismisses objects or clears an authentication pause. Stopping the app stops sound and monitoring but retains unread objects for the next launch. Signing out dismisses local alerts, removes the saved session, and hides private dashboard content while retaining local history.
 
@@ -77,7 +77,15 @@ Objects are written to private local files independently of sound playback or an
 - Home, Dashboard, Alerts, and Setup are separate tabs with keyboard navigation and touch controls.
 - Home opens by default with new alerts beside a compact latest-screenshot preview. On narrow screens the preview stacks below the alert. It always filters to undismissed alerts, regardless of the Alerts tab filter.
 - Dashboard scales the entire latest screenshot to the available area; opening it full size is an explicit action.
+- Each change alert freezes its own current screenshot and highlighted pixel diff at detection. Screenshot and Diff views open the saved event images, rather than the changing live capture. Auth alerts do not capture login forms.
 - Alerts offers New and All filters, previous/next item controls, and separate views for the overview and both LLM outputs. Long explanations use text pagination instead of overflowing the viewport.
-- Setup contains Session & app and PagerDuty subsections. Sign-in, sign-out, Stop App, and integration settings live there. Auth Needed alerts also offer the sign-in action directly.
+- Setup contains Session & app, PagerDuty, and Tunnel subsections. Sign-in, sign-out, Stop App, and integration settings live there. Auth Needed alerts also offer the sign-in action directly.
 - The open-alert count and status light remain visible across tabs. A new screenshot does not change the selected tab or dismiss any alert.
 - Portrait phone and short landscape layouts use compact spacing; the screenshot and alert text use the remaining vertical space.
+
+
+## Cloudflare tunnel controls
+
+Setup provides Start Tunnel / Stop Tunnel for one app-owned `cloudflared tunnel --url` process. Starting an already running tunnel does not create another process. Stop closes the current tunnel, and stopping Session Watch also closes it. Unrelated system tunnels are left alone. Status distinguishes starting, running, stopped, and failed startup, with the private access link when available.
+
+Remote access requires the generated private link, which establishes a Secure, HttpOnly, SameSite cookie. Requests without it cannot access screenshots, alerts, state, or action tokens. Remote writes also require the action token and matching Origin. Remote clients cannot submit monitor events. Stopping the tunnel invalidates the link and cookie. Alert image routes accept only fixed filenames and validated alert IDs, and remain unavailable when signed out.

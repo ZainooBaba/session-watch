@@ -39,11 +39,15 @@ def play_alert(config, result, root=None):
             fallback = play_alert({**config, 'alerts': {**settings, 'persistent': False}}, result)
             return {**(fallback or {}), 'persistent': False,
                     'error': 'Control service unavailable; persistent alert was not queued'}
-    sound = settings.get('login_sound' if kind == 'login' else 'change_sound',
-                         'Basso' if kind == 'login' else 'Glass')
+    category = result.get('alert_category') or ('auth_needed' if kind == 'login' else
+        'interview_invite' if result.get('classification') == 'content_change' and result.get('invite', {}).get('classification') == 'interview_invite' else
+        'review_needed' if result.get('invite', {}).get('classification') in {'possible_invite', 'interview_invite'} else 'change')
+    defaults = {'auth_needed': ('login_sound', 'Basso', 3), 'change': ('change_sound', 'Glass', 2),
+                'review_needed': ('review_sound', 'Ping', 2), 'interview_invite': ('invite_sound', 'Hero', 3)}
+    key, default, repeats = defaults.get(category, defaults['change'])
+    sound = settings.get(key, default)
     volume = settings.get('volume', 1.0)
-    repeats = 3 if kind == 'login' else 2
-    event = {'kind': kind, 'sound': sound, 'repeats': repeats, 'volume': volume, 'played': False}
+    event = {'category': category, 'kind': kind, 'sound': sound, 'repeats': repeats, 'volume': volume, 'played': False}
     if sys.platform != 'darwin':
         return {**event, 'error': 'Built-in sound playback currently supports macOS only'}
     if not isinstance(sound, str) or not sound.isalnum():
