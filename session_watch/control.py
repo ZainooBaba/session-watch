@@ -356,7 +356,7 @@ def handler_for(controller, token):
             if not self.local_request() and parsed.path == '/' and access and secrets.compare_digest(access, controller.tunnel.secret):
                 self.send_response(303)
                 self.send_header('Location', '/')
-                self.send_header('Set-Cookie', 'sw-access=' + controller.tunnel.secret + '; Path=/; HttpOnly; Secure; SameSite=Strict')
+                self.send_header('Set-Cookie', 'sw-access=' + controller.tunnel.secret + '; Path=/; HttpOnly; Secure; SameSite=Lax')
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('Referrer-Policy', 'no-referrer')
                 self.send_header('Content-Length', '0')
