@@ -158,9 +158,10 @@ Open `http://127.0.0.1:8765`. The supervisor starts monitoring and keeps an aler
 sounding every eight seconds until you choose **Silence alert / acknowledge**.
 Login alerts continue even after the watcher stops for sign-in. Acknowledgment
 silences the current alert; a new detected change can trigger another one.
-**Open login browser** pauses monitoring and acknowledges the sound. Complete
-sign-in yourself, then choose **Save session & resume**. **Resume monitoring**
-restarts a paused watcher with saved state.
+The single **Sign in** button opens the login browser and silences the current
+sound. Complete sign-in, then the same button becomes **I’m signed in**: click
+it to save the session and automatically resume monitoring. When a valid saved
+session is simply paused, the button offers **Resume monitoring** instead.
 
 The control page binds only to loopback, rejects other Host/Origin values, and
 requires a private local token for state changes. Do not expose this server to
@@ -197,3 +198,9 @@ the login browser silences the current sound but keeps the sign-in indicator gre
 until acknowledged or login is completed. A known red/green state is retained
 if the control page temporarily loses its connection. Reduced-motion preferences
 disable the yellow pulse.
+
+The sign-in section has one button and one instruction. While monitoring is
+healthy it says **Sign in again**; after opening the browser it says
+**I’m signed in**. Saving also restarts monitoring, so there is no separate
+save/resume decision. Each action checks the current step to avoid accidentally
+submitting a stale action after the page’s state changes.

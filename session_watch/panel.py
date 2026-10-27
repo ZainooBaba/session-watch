@@ -22,7 +22,7 @@ main{max-width:1240px;padding:38px 40px 32px;margin:auto}header{display:flex;ali
 <div class="image-shell"><div class="countdown-track" id="capture-progress" role="progressbar" aria-label="Time remaining until next screenshot" aria-valuemin="0" aria-valuemax="100"><div class="countdown-fill" id="countdown-fill"></div></div><a id="full-screenshot" target="_blank" rel="noopener"><img id="latest-screenshot" hidden alt="Most recent authenticated dashboard screenshot"></a><div id="empty-image" class="empty">Your next dashboard capture will appear here.</div></div>
 <div class="capture-foot"><span id="countdown-label">Waiting for monitor…</span><span>Open image for full size ↗</span></div>
 </section>
-<section class="session"><div><h2>Session controls</h2><p>Sign in yourself, then save your session to continue.</p></div><div class="actions"><button onclick="act('login')">Open login</button><button class="primary" onclick="act('save-login')">Save & resume</button><button onclick="act('resume')">Resume monitor</button></div></section>
+<section class="session"><div><h2>Sign-in</h2><p id="session-instruction">Checking your session…</p></div><div class="actions"><button class="primary" id="session-button" onclick="act('session')">Sign in</button></div></section>
 <p id="result" role="status"></p><footer class="bottom"><span>Local only · Captures every 1–2 minutes</span><span>Basso: login required · Glass: change detected</span></footer>
 </main>
 <script>
@@ -57,6 +57,8 @@ async function refresh(){
  $('alert').textContent=s.indicator.state==='change'?'A dashboard change was detected':s.indicator.state==='action'?(s.indicator.label==='Sign-in needed'?'Finish sign-in to continue':'Your attention is needed'):s.monitoring?'All quiet. We’re keeping watch.':'Monitoring is paused';
  $('alert-detail').textContent=s.alert?'Your alert will repeat until acknowledged.':'You’ll hear a distinct sound when something needs you.';
  $('message').textContent=s.message||s.timing?.last_error||'';
+ $('session-instruction').textContent=s.session.instruction;
+ if(!busy)$('session-button').textContent=s.session.label;
  if(s.screenshot){
   const shot=s.screenshot,image=$('latest-screenshot');
   $('capture-status').textContent='Last captured';$('capture-time').dateTime=shot.captured_at;$('capture-time').textContent=centralTime(shot.captured_at);
@@ -66,11 +68,11 @@ async function refresh(){
  paintCountdown();
 }
 async function act(action){
- if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('result').textContent='Working…';
+ if(busy)return;const step=monitor?.session?.step;if(action==='session'&&!step)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('result').textContent=action==='session'?(step==='finish'?'Checking your sign-in and starting monitoring…':step==='resume'?'Resuming monitoring…':'Opening the sign-in browser…'):'Acknowledging alert…';
  try{
-  const response=await fetch('/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Session-Watch-Token':token},body:JSON.stringify({version})});
+  const response=await fetch('/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Session-Watch-Token':token},body:JSON.stringify({version,step})});
   const data=await response.json();if(!response.ok)throw Error(data.error);
-  $('result').textContent=action==='acknowledge'?'Alert acknowledged.':action==='login'?'Complete sign-in in the opened browser, then select Save & resume.':'Done.';
+  $('result').textContent=action==='acknowledge'?'Alert acknowledged.':step==='signin'?'Sign in in the opened browser. When finished, click “I’m signed in” here.':step==='finish'?'Session saved. Monitoring has resumed.':'Monitoring has resumed.';
  }catch(error){$('result').textContent=error.message}
  finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);await refresh().catch(disconnected)}
 }

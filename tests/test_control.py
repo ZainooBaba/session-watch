@@ -178,3 +178,22 @@ def test_signin_state_latches_after_browser_closes_and_takes_priority(controller
     assert restored.status()['indicator']['state'] == 'action'
     controller.acknowledge()
     assert controller.status()['indicator']['state'] == 'idle'
+
+
+def test_single_signin_button_follows_session_state(controller, monkeypatch):
+    assert controller.session_info()['label'] == 'Sign in'
+    open_login = Mock(); monkeypatch.setattr(controller, 'begin_login', open_login)
+    controller.session_action('signin'); open_login.assert_called_once()
+    login = Mock(); login.poll.return_value = None; controller.login = login
+    assert controller.session_info()['label'] == "I'm signed in"
+    with pytest.raises(ValueError):
+        controller.session_action('signin')
+    finish = Mock(); monkeypatch.setattr(controller, 'save_login', finish)
+    controller.session_action('finish'); finish.assert_called_once()
+    login.poll.return_value = 0
+    (controller.root / 'storage.json').write_text('{}')
+    assert controller.session_info()['label'] == 'Resume monitoring'
+    resume = Mock(); monkeypatch.setattr(controller, 'resume', resume)
+    controller.session_action('resume'); resume.assert_called_once()
+    worker = Mock(); worker.poll.return_value = None; controller.worker = worker
+    assert controller.session_info()['label'] == 'Sign in again'

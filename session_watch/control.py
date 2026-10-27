@@ -128,6 +128,32 @@ class Controller:
             self.acknowledge()
         self.resume()
 
+    def session_info(self):
+        login_open = bool(self.login and self.login.poll() is None)
+        monitoring = bool(self.worker and self.worker.poll() is None)
+        needs_login = ((self.active and self.active['kind'] == 'login')
+                       or (self.attention and self.attention['kind'] == 'login'))
+        if login_open:
+            return {'step': 'finish', 'label': "I'm signed in",
+                    'instruction': 'Finish signing in in the opened browser, then click “I’m signed in” here. We’ll save your session and restart monitoring.'}
+        if not monitoring and not needs_login and (self.root / 'storage.json').exists():
+            return {'step': 'resume', 'label': 'Resume monitoring',
+                    'instruction': 'Your session is saved. Resume monitoring with one click.'}
+        return {'step': 'signin', 'label': 'Sign in again' if monitoring else 'Sign in',
+                'instruction': 'You’re signed in and monitoring. Only use this button if you need to sign in again.' if monitoring
+                else 'Click Sign in. A browser will open for you to complete sign-in.'}
+
+    def session_action(self, expected_step):
+        step = self.session_info()['step']
+        if step != expected_step:
+            raise ValueError('The sign-in status changed. Follow the updated instruction and try again.')
+        if step == 'finish':
+            self.save_login()
+        elif step == 'resume':
+            self.resume()
+        else:
+            self.begin_login()
+
     def status(self):
         screenshot = self.root / 'screenshots' / 'latest.png'
         try:
@@ -161,6 +187,7 @@ class Controller:
                 indicator = {'state': 'idle', 'label': 'Paused'}
             return {'alert': self.active, 'message': self.message, 'screenshot': latest,
                     'attention': self.attention, 'indicator': indicator,
+                    'session': self.session_info(),
                     'timing': timing, 'server_time': time.time(),
                     'monitoring': monitoring, 'login_open': login_open}
 
@@ -223,6 +250,8 @@ def handler_for(controller, token):
                     controller.notify(data)
                 elif self.path == '/acknowledge':
                     controller.acknowledge(data.get('version'))
+                elif self.path == '/session':
+                    controller.session_action(data.get('step'))
                 elif self.path == '/login':
                     controller.begin_login()
                 elif self.path == '/save-login':
@@ -233,7 +262,7 @@ def handler_for(controller, token):
                     return self.reply({'error': 'Not found'}, 404)
                 self.reply({'ok': True})
             except (ValueError, TypeError, OSError, subprocess.SubprocessError) as exc:
-                if self.path in {'/login', '/save-login', '/resume'}:
+                if self.path in {'/login', '/save-login', '/resume', '/session'}:
                     controller.set_attention('login' if self.path != '/resume' else 'action')
                 self.reply({'error': str(exc)}, 400)
     return Handler
