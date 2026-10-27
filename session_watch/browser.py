@@ -24,8 +24,13 @@ class Browser:
         self.playwright = sync_playwright().start()
         try:
             self.browser = self.playwright.chromium.launch(headless=not self.headed)
+            # Keep website rollout decisions consistent between login and monitoring.
+            # Derive the identity from this installed browser, rather than pinning a version.
+            probe = self.browser.new_page()
+            user_agent = probe.evaluate("navigator.userAgent").replace("HeadlessChrome/", "Chrome/")
+            probe.context.close()
             state = self.root / "storage.json"
-            self.context = self.browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=1, storage_state=str(state) if state.exists() else None)
+            self.context = self.browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=1, user_agent=user_agent, storage_state=str(state) if state.exists() else None)
             session = self.root / "session.json"
             if session.exists():
                 self.context.add_init_script("(" + RESTORE_SESSION + ")(" + session.read_text() + ")")

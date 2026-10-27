@@ -93,6 +93,8 @@ HTML comparison uses the rendered `page.content()` document, including scripts a
 
 Screenshot comparison uses a 1280 × 900 viewport and a full-page PNG, hides animations/carets, and flags differences when at least **0.1%** of pixels exceed a per-channel tolerance of **20**, or image dimensions change. It saves before/after images and a pink-highlighted difference image. The screenshot baseline advances on authenticated captures independently of the invitation review. Login pages are not captured.
 
+Login and background monitoring use the installed Chromium version's normal browser identity. This keeps sites such as Thalamus from returning different interface rollout settings solely because monitoring runs headlessly. Set the target URL to the address you actually use after signing in; different hosts can also serve different layouts.
+
 ## Sign out and stop
 
 The footer offers two controls with explanations before confirmation:

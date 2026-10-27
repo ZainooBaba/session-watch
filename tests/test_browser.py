@@ -55,6 +55,8 @@ def test_saved_login_content_change_and_expiry(website, tmp_path, monkeypatch):
     monkeypatch.setattr(httpx.Client, "post", lambda *a, **k: response)
     # Simulate what a human's successful login stores, without automating a real login.
     with Browser(config, tmp_path) as browser:
+        assert "HeadlessChrome" not in browser.page.evaluate("navigator.userAgent")
+        assert "Chrome/" + browser.browser.version in browser.page.evaluate("navigator.userAgent")
         browser.context.add_cookies([{"name": "session", "value": "valid", "url": origin}])
         browser.page.goto(origin + "/account")
         browser.page.evaluate("sessionStorage.setItem('example', 'persisted')")
