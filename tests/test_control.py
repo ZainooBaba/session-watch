@@ -197,3 +197,53 @@ def test_single_signin_button_follows_session_state(controller, monkeypatch):
     controller.session_action('resume'); resume.assert_called_once()
     worker = Mock(); worker.poll.return_value = None; controller.worker = worker
     assert controller.session_info()['label'] == 'Sign in again'
+
+
+def test_signout_stops_children_forgets_auth_and_preserves_history(controller):
+    for name in ['storage.json', 'session.json', 'baseline.json', 'events.jsonl']:
+        (controller.root / name).write_text('{}')
+    worker, login = Mock(), Mock()
+    worker.poll.return_value = None; login.poll.return_value = None
+    controller.worker = worker; controller.login = login
+    controller.notify({'classification': 'auth_expired'})
+    controller.sign_out()
+    worker.send_signal.assert_called_once(); worker.wait.assert_called_once()
+    login.send_signal.assert_called_once(); login.wait.assert_called_once()
+    assert not (controller.root / 'storage.json').exists()
+    assert not (controller.root / 'session.json').exists()
+    assert (controller.root / 'events.jsonl').exists()
+    assert controller.status()['indicator'] == {'state': 'idle', 'label': 'Signed out'}
+    assert controller.status()['screenshot'] is None
+    assert controller.active is None and controller.attention is None
+    assert controller.session_info()['label'] == 'Sign in'
+    assert not controller.closed.is_set()
+
+
+def test_stop_app_stops_processes_and_retains_saved_login(controller):
+    (controller.root / 'storage.json').write_text('{}')
+    worker = Mock(); worker.poll.return_value = None; controller.worker = worker
+    controller.notify({'classification': 'content_change'})
+    controller.stop_app()
+    assert controller.closed.is_set() and controller.wake.is_set()
+    assert controller.worker is None and controller.active is None
+    worker.send_signal.assert_called_once()
+    assert (controller.root / 'storage.json').exists()
+
+
+def test_signed_out_screenshot_is_not_served_and_stop_endpoint_shuts_server(controller):
+    folder = controller.root / 'screenshots'; folder.mkdir()
+    (folder / 'latest.png').write_bytes(b'private image')
+    controller.sign_out()
+    server = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(controller, 'secret'))
+    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        with httpx.Client(trust_env=False) as client:
+            assert client.get(url + '/screenshot/latest.png').status_code == 403
+            assert client.post(url + '/stop', json={}).status_code == 403
+            response = client.post(url + '/stop', json={}, headers={'X-Session-Watch-Token': 'secret'})
+            assert response.status_code == 200 and response.json()['stopped']
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+    finally:
+        server.shutdown(); server.server_close(); thread.join()

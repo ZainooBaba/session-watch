@@ -97,6 +97,8 @@ class Controller:
 
     def resume(self):
         with self.actions:
+            if not (self.root / 'storage.json').exists():
+                raise ValueError('Sign in before starting monitoring.')
             if self.login and self.login.poll() is None:
                 raise ValueError('Finish sign-in and save the session first.')
             if self.worker and self.worker.poll() is None:
@@ -125,8 +127,46 @@ class Controller:
             if code:
                 self.set_attention('login')
                 raise ValueError('Login was not confirmed. Open the login browser and try again.')
+            if (self.root / 'signed-out').exists():
+                for name in ['baseline.json', 'screenshots/baseline.png', 'screenshots/latest.png',
+                             'screenshots/previous.png', 'screenshots/latest-diff.png']:
+                    (self.root / name).unlink(missing_ok=True)
+                (self.root / 'signed-out').unlink()
             self.acknowledge()
         self.resume()
+
+    def stop_processes(self):
+        for process in [self.worker, self.login]:
+            if process and process.poll() is None:
+                try:
+                    process.send_signal(signal.SIGINT)
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                except ProcessLookupError:
+                    pass
+        self.worker = self.login = None
+
+    def sign_out(self):
+        with self.actions:
+            self.stop_processes()
+            for name in ['storage.json', 'session.json']:
+                (self.root / name).unlink(missing_ok=True)
+            atomic_write(self.root / 'signed-out', datetime.now(timezone.utc).isoformat())
+            self.acknowledge()
+            self.message = ''
+
+    def stop_app(self):
+        self.closed.set()
+        self.wake.set()
+        with self.actions:
+            self.stop_processes()
+            self.acknowledge()
 
     def session_info(self):
         login_open = bool(self.login and self.login.poll() is None)
@@ -163,6 +203,8 @@ class Controller:
                       'url': '/screenshot/latest.png?v=' + str(info.st_mtime_ns)}
         except FileNotFoundError:
             latest = None
+        if (self.root / 'signed-out').exists():
+            latest = None
         timing = None
         try:
             data = json.loads((self.root / 'monitor-state.json').read_text())
@@ -184,10 +226,10 @@ class Controller:
             elif monitoring:
                 indicator = {'state': 'active', 'label': 'Monitoring'}
             else:
-                indicator = {'state': 'idle', 'label': 'Paused'}
+                indicator = {'state': 'idle', 'label': 'Signed out' if (self.root / 'signed-out').exists() else 'Paused'}
             return {'alert': self.active, 'message': self.message, 'screenshot': latest,
                     'attention': self.attention, 'indicator': indicator,
-                    'session': self.session_info(),
+                    'session': self.session_info(), 'signed_out': (self.root / 'signed-out').exists(),
                     'timing': timing, 'server_time': time.time(),
                     'monitoring': monitoring, 'login_open': login_open}
 
@@ -222,6 +264,8 @@ def handler_for(controller, token):
             if self.path == '/status':
                 return self.reply(controller.status())
             if urlsplit(self.path).path == '/screenshot/latest.png':
+                if (controller.root / 'signed-out').exists():
+                    return self.reply({'error': 'Sign in to view dashboard screenshots'}, 403)
                 try:
                     data = (controller.root / 'screenshots' / 'latest.png').read_bytes()
                 except FileNotFoundError:
@@ -250,6 +294,13 @@ def handler_for(controller, token):
                     controller.notify(data)
                 elif self.path == '/acknowledge':
                     controller.acknowledge(data.get('version'))
+                elif self.path == '/signout':
+                    controller.sign_out()
+                elif self.path == '/stop':
+                    controller.stop_app()
+                    self.reply({'ok': True, 'stopped': True})
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 elif self.path == '/session':
                     controller.session_action(data.get('step'))
                 elif self.path == '/login':
@@ -281,7 +332,8 @@ def main():
         atomic_write(controller.root / 'control.json', json.dumps({'port': server.server_port, 'token': token}))
         atomic_write(controller.root / 'control.pid', str(os.getpid()))
         threading.Thread(target=controller.audio_loop, daemon=True).start()
-        controller.resume()
+        if (controller.root / 'storage.json').exists() and not (controller.root / 'signed-out').exists():
+            controller.resume()
         print(f'Control panel: http://127.0.0.1:{server.server_port}', flush=True)
         try:
             server.serve_forever()

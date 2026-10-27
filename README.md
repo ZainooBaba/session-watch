@@ -204,3 +204,18 @@ healthy it says **Sign in again**; after opening the browser it says
 **I’m signed in**. Saving also restarts monitoring, so there is no separate
 save/resume decision. Each action checks the current step to avoid accidentally
 submitting a stale action after the page’s state changes.
+
+## Sign out and stop
+
+The footer has two separate controls, each with a confirmation explaining its effect:
+
+- **Sign out** stops monitoring, closes the monitor/login browser, silences alerts,
+  and removes the saved cookies/storage files from this Mac. The control page stays
+  available, and its screenshot is hidden while signed out. This clears Session
+  Watch's local login; it does not revoke other Thalamus sessions or remote tokens.
+  Existing history stays local. The next successful sign-in starts a fresh comparison
+  baseline, so images from a previous account are not shown as the current capture.
+- **Stop app** stops monitoring, login windows, repeating alerts, and the local
+  control server. It keeps the saved login and does not stop a shared Ollama service.
+  The page displays Stopped and stops polling. Start the control supervisor again
+  (or ask the assistant) to run Session Watch later.
