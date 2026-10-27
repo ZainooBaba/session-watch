@@ -184,3 +184,16 @@ as the scheduled next capture approaches. The countdown uses the watcher's actua
 randomized delay and switches to Capturing or Comparing while a check runs. It
 shows a paused/sign-in state without a fabricated countdown when monitoring stops.
 Capture times remain in Central time.
+
+## Monitor status dot
+
+The status dot pulses yellow while monitoring is active, stays red for a detected
+change alert, stays green for sign-in or other required action, and is gray when
+idle/disconnected. An unresolved login takes priority over a change alert.
+Alert/attention state is persisted separately from screenshots: new captures,
+normal checks, page reloads, and service restarts cannot clear it. Acknowledgment
+clears the latched alert; successful session saving also acknowledges it. Opening
+the login browser silences the current sound but keeps the sign-in indicator green
+until acknowledged or login is completed. A known red/green state is retained
+if the control page temporarily loses its connection. Reduced-motion preferences
+disable the yellow pulse.

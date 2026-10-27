@@ -143,3 +143,38 @@ def test_countdown_uses_only_current_watchers_schedule(controller):
     assert isinstance(result['server_time'], float)
     worker.pid = 456
     assert controller.status()['timing'] is None
+
+
+def test_indicator_stays_red_across_screenshots_checks_and_restart(controller):
+    from PIL import Image
+    worker = Mock(); worker.pid = 123; worker.poll.return_value = None
+    controller.worker = worker
+    assert controller.status()['indicator']['state'] == 'active'
+    controller.notify({'classification': 'content_change'})
+    folder = controller.root / 'screenshots'; folder.mkdir()
+    for color in ['white', 'black']:
+        Image.new('RGB', (10, 10), color).save(folder / 'latest.png')
+        controller.notify({'classification': 'unchanged'})
+        assert controller.status()['indicator']['state'] == 'change'
+    restored = Controller(controller.path)
+    assert restored.status()['indicator']['state'] == 'change'
+    controller.acknowledge()
+    assert controller.status()['indicator']['state'] == 'active'
+    controller.worker = None
+    assert controller.status()['indicator']['state'] == 'idle'
+
+
+def test_signin_state_latches_after_browser_closes_and_takes_priority(controller):
+    controller.set_attention('login')
+    controller.notify({'classification': 'content_change'})
+    assert controller.status()['indicator'] == {'state': 'action', 'label': 'Sign-in needed'}
+    controller.acknowledge()
+    controller.login = Mock(); controller.login.poll.return_value = None
+    assert controller.status()['indicator']['state'] == 'action'
+    controller.set_attention('login')
+    controller.login.poll.return_value = 1
+    assert controller.status()['indicator']['label'] == 'Sign-in needed'
+    restored = Controller(controller.path)
+    assert restored.status()['indicator']['state'] == 'action'
+    controller.acknowledge()
+    assert controller.status()['indicator']['state'] == 'idle'

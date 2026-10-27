@@ -33,6 +33,8 @@ class Controller:
         self.worker = self.login = None
         self.message = ''
         self.sequence = 0
+        attention_file = self.root / 'attention.json'
+        self.attention = json.loads(attention_file.read_text()) if attention_file.exists() else None
         saved = self.root / 'active-alert.json'
         self.active = json.loads(saved.read_text()) if saved.exists() else None
         if self.active:
@@ -40,6 +42,7 @@ class Controller:
 
     def persist(self):
         atomic_write(self.root / 'active-alert.json', json.dumps(self.active))
+        atomic_write(self.root / 'attention.json', json.dumps(self.attention))
 
     def notify(self, result):
         kind = alert_kind(result)
@@ -47,19 +50,27 @@ class Controller:
             return
         with self.lock:
             self.sequence += 1
-            if self.active and self.active['kind'] == 'login':
+            if ((self.active and self.active['kind'] == 'login')
+                    or (self.attention and self.attention['kind'] == 'login')):
                 kind = 'login'
             self.active = {'kind': kind, 'version': self.sequence,
                            'since': self.active['since'] if self.active else datetime.now(timezone.utc).isoformat(),
                            'count': self.active['count'] + 1 if self.active else 1}
+            self.attention = {'kind': kind}
             self.persist()
         self.wake.set()
+
+    def set_attention(self, kind):
+        with self.lock:
+            self.attention = {'kind': kind}
+            self.persist()
 
     def acknowledge(self, version=None):
         with self.lock:
             if self.active and version is not None and version != self.active['version']:
                 raise ValueError('A newer alert arrived. Review the panel and acknowledge again.')
             self.active = None
+            self.attention = None
             self.persist()
         self.wake.set()
 
@@ -102,6 +113,7 @@ class Controller:
                 self.worker.wait(timeout=45)
             self.login = self.spawn('login', subprocess.PIPE)
             self.acknowledge()
+            self.set_attention('login')
 
     def save_login(self):
         with self.actions:
@@ -111,6 +123,7 @@ class Controller:
             self.login.stdin.flush()
             code = self.login.wait(timeout=60)
             if code:
+                self.set_attention('login')
                 raise ValueError('Login was not confirmed. Open the login browser and try again.')
             self.acknowledge()
         self.resume()
@@ -132,10 +145,24 @@ class Controller:
         except (OSError, ValueError):
             pass
         with self.lock:
+            monitoring = bool(self.worker and self.worker.poll() is None)
+            login_open = bool(self.login and self.login.poll() is None)
+            needs_login = login_open or (self.active and self.active['kind'] == 'login') or (self.attention and self.attention['kind'] == 'login')
+            changed = (self.active and self.active['kind'] == 'change') or (self.attention and self.attention['kind'] == 'change')
+            if needs_login:
+                indicator = {'state': 'action', 'label': 'Sign-in needed'}
+            elif changed:
+                indicator = {'state': 'change', 'label': 'Change alert'}
+            elif self.attention:
+                indicator = {'state': 'action', 'label': 'Action needed'}
+            elif monitoring:
+                indicator = {'state': 'active', 'label': 'Monitoring'}
+            else:
+                indicator = {'state': 'idle', 'label': 'Paused'}
             return {'alert': self.active, 'message': self.message, 'screenshot': latest,
+                    'attention': self.attention, 'indicator': indicator,
                     'timing': timing, 'server_time': time.time(),
-                    'monitoring': bool(self.worker and self.worker.poll() is None),
-                    'login_open': bool(self.login and self.login.poll() is None)}
+                    'monitoring': monitoring, 'login_open': login_open}
 
 
 
@@ -206,6 +233,8 @@ def handler_for(controller, token):
                     return self.reply({'error': 'Not found'}, 404)
                 self.reply({'ok': True})
             except (ValueError, TypeError, OSError, subprocess.SubprocessError) as exc:
+                if self.path in {'/login', '/save-login', '/resume'}:
+                    controller.set_attention('login' if self.path != '/resume' else 'action')
                 self.reply({'error': str(exc)}, 400)
     return Handler
 
