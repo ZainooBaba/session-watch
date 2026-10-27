@@ -11,6 +11,7 @@ import tomllib
 from filelock import FileLock, Timeout
 from .browser import Browser
 from .core import atomic_write, decide, evidence
+from .schedule import next_interval, validate_schedule
 
 
 def emit(root, result):
@@ -44,8 +45,7 @@ def run(args):
     config = tomllib.loads(config_path.read_text())
     if not config.get("url", "").startswith(("https://", "http://")):
         raise ValueError("Set an http(s) URL in config.toml")
-    if config.get("interval_seconds", 60) < 1:
-        raise ValueError("interval_seconds must be at least 1")
+    validate_schedule(config)
     if not config.get("llm", {}).get("model"):
         raise ValueError("Set llm.model in config.toml")
     # Sessions and snapshots are private local files, never repository source.
@@ -79,7 +79,7 @@ def run(args):
                         return 2
                     if args.command == "check":
                         return 3 if outcome == "uncertain" else 0
-                time.sleep(config.get("interval_seconds", 60))
+                time.sleep(next_interval(config))
 
 
 def main():

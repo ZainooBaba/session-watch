@@ -19,3 +19,10 @@ model = "qwen3:8b"
 timeout_seconds = 120
 max_input_chars = 24000
 minimum_confidence = 0.8
+
+[refresh]
+distribution = "truncated_normal"
+min_seconds = 60
+max_seconds = 120
+mean_seconds = 90
+stddev_seconds = 15

@@ -6,7 +6,7 @@ Monitor a website behind a human login. Refresh its rendered HTML on a schedule,
 
 1. `login` opens Chromium. You complete sign-in, SSO, and MFA yourself.
 2. Cookies, localStorage, IndexedDB, and sessionStorage are saved locally.
-3. `watch` opens the target with that saved session, revisits the configured URL every interval, waits for rendering, and compares serialized HTML.
+3. `watch` opens the target with that saved session, revisits the configured URL on the configured schedule, waits for rendering, and compares serialized HTML.
 4. Identical HTML makes no LLM request. Changed HTML produces redacted before/after excerpts and a diff for Ollama.
 5. A confident `content_change` emits an event, saves change evidence, and advances the baseline.
 6. `auth_expired` stops the watcher with exit code 2. Log in again and restart. The old content baseline remains, so changes made during expiry can still be detected.
@@ -48,6 +48,23 @@ Log in using the opened browser. Once the target content is visible, press Enter
 When authentication expires, run `session-watch login`, then `session-watch watch` again. A single lock prevents simultaneous login/watch commands from overwriting each other's saved state. Stop a running watcher before logging in. All commands accept `--config /path/to/config.toml`; state paths are relative to that configuration file.
 
 The first successful check creates the baseline. There is no prior page to classify on that check. Human login plus configured authentication checks establish the initial page.
+
+## Refresh timing
+
+The example configuration uses a truncated normal distribution: mean 90 seconds,
+standard deviation 15 seconds, and strict bounds of 60–120 seconds. Samples outside
+the bounds are redrawn. The delay begins after each check completes; page loading
+and LLM inference add to the time between navigation starts. Remove `[refresh]`
+to use the fixed `interval_seconds` setting instead.
+
+```toml
+[refresh]
+distribution = "truncated_normal"
+min_seconds = 60
+max_seconds = 120
+mean_seconds = 90
+stddev_seconds = 15
+```
 
 ## Results
 
