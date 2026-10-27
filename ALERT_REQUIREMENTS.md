@@ -74,7 +74,8 @@ Objects are written to private local files independently of sound playback or an
 ## Responsive interface
 
 - The app occupies the current viewport using dynamic viewport height, with no scrolling of the main page.
-- Dashboard, Alerts, and Setup are separate tabs with keyboard navigation and touch controls.
+- Home, Dashboard, Alerts, and Setup are separate tabs with keyboard navigation and touch controls.
+- Home opens by default with new alerts beside a compact latest-screenshot preview. On narrow screens the preview stacks below the alert. It always filters to undismissed alerts, regardless of the Alerts tab filter.
 - Dashboard scales the entire latest screenshot to the available area; opening it full size is an explicit action.
 - Alerts offers New and All filters, previous/next item controls, and separate views for the overview and both LLM outputs. Long explanations use text pagination instead of overflowing the viewport.
 - Setup contains Session & app and PagerDuty subsections. Sign-in, sign-out, Stop App, and integration settings live there. Auth Needed alerts also offer the sign-in action directly.
