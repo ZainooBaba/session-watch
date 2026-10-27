@@ -79,3 +79,12 @@ def test_atomic_private_write(tmp_path):
     atomic_write(path, "secret")
     assert path.read_text() == "secret"
     assert path.stat().st_mode & 0o077 == 0
+
+
+def test_minified_page_diff_keeps_changes_beyond_large_header():
+    header = "<header>" + "<span>Unchanged navigation</span>" * 1000 + "</header>"
+    before = page(header + "<main>One appointment</main>")
+    after = page(header + "<main>Two appointments</main>")
+    payload = evidence(before, after, 8000)
+    assert "Two appointments" in payload["diff"]
+    assert "One appointment" in payload["diff"]

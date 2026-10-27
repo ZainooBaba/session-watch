@@ -82,7 +82,10 @@ def redact(html: str) -> str:
 
 def evidence(before: dict, after: dict, budget: int) -> dict:
     old, new = redact(before["html"]), redact(after["html"])
-    diff = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm=""))
+    # Render adjacent tags on separate lines so minified pages produce focused diffs.
+    old_lines = re.sub(r">(?=<)", ">\n", old).splitlines()
+    new_lines = re.sub(r">(?=<)", ">\n", new).splitlines()
+    diff = "\n".join(difflib.unified_diff(old_lines, new_lines, lineterm=""))
     # Keep page context AND a diff; expose truncation rather than hiding it.
     part = max(256, budget // 4)
     return {
