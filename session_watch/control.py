@@ -11,11 +11,13 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 
 from filelock import FileLock
 from .alerts import alert_kind, play_alert
 from .core import atomic_write
+from .panel import PAGE
 
 
 class Controller:
@@ -122,16 +124,20 @@ class Controller:
                       'url': '/screenshot/latest.png?v=' + str(info.st_mtime_ns)}
         except FileNotFoundError:
             latest = None
+        timing = None
+        try:
+            data = json.loads((self.root / 'monitor-state.json').read_text())
+            if self.worker and data.get('pid') == self.worker.pid:
+                timing = data
+        except (OSError, ValueError):
+            pass
         with self.lock:
             return {'alert': self.active, 'message': self.message, 'screenshot': latest,
+                    'timing': timing, 'server_time': time.time(),
                     'monitoring': bool(self.worker and self.worker.poll() is None),
                     'login_open': bool(self.login and self.login.poll() is None)}
 
 
-PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Session Watch</title><style>body{font:17px system-ui;background:#102334;color:#eef6fa;margin:0;padding:40px}main{max-width:1100px;margin:auto}section{background:#1b3548;padding:28px;border-radius:18px;margin:24px 0}button{font:inherit;padding:12px 18px;margin:6px;border:0;border-radius:9px;background:#8ad8ce;color:#102334;cursor:pointer}button:disabled{opacity:.5}#alert{font-size:24px;font-weight:650}small{color:#b8cbd6}a{color:#8ad8ce}figure{margin:20px 0 0}#latest-screenshot{display:block;width:100%;height:auto;border-radius:10px;background:#fff}#latest-screenshot[hidden]{display:none}figcaption{margin-top:12px;color:#b8cbd6}time{font-variant-numeric:tabular-nums}</style>
-<main><h1>Session Watch</h1><p>Your dashboard monitor and sound controls</p><section><p id="status">Connecting…</p><p id="alert"></p><p id="message"></p><button onclick="act('acknowledge')">Silence alert / acknowledge</button><p><small>Basso: sign-in needed · Glass: HTML or screenshot changed.<br>Sounds repeat until acknowledged. A new change can start a new alert.</small></p></section><section><h2>Latest dashboard screenshot</h2><p id="capture-status">Waiting for the first dashboard capture.</p><figure><a id="full-screenshot" target="_blank" rel="noopener"><img id="latest-screenshot" hidden alt="Most recent authenticated dashboard screenshot"></a><figcaption><time id="capture-time"></time><span id="capture-hint" hidden> · Select the image to open it full size.</span></figcaption></figure></section><section><h2>Sign in again</h2><p>Open the browser, complete sign-in yourself, then save the session.</p><button onclick="act('login')">1. Open login browser</button><button onclick="act('save-login')">2. Save session & resume</button><button onclick="act('resume')">Resume monitoring</button></section><p id="result" role="status"></p></main>
-<script>const token='__TOKEN__';let version=null;let busy=false;let screenshotVersion=null;async function refresh(){const r=await fetch('/status',{cache:'no-store'});const s=await r.json();version=s.alert?.version??null;document.getElementById('status').textContent=s.login_open?'Waiting for your sign-in':s.monitoring?'Monitoring is running':'Monitoring is paused';document.getElementById('alert').textContent=s.alert?(s.alert.kind==='login'?'Sign-in required — alert repeating':'Change detected — alert repeating'):'No active sound alert';document.getElementById('message').textContent=s.message||'';if(s.screenshot){const shot=s.screenshot;const image=document.getElementById('latest-screenshot');document.getElementById('capture-status').textContent='Most recent successful dashboard capture';const time=document.getElementById('capture-time');time.dateTime=shot.captured_at;time.textContent='Captured '+new Date(shot.captured_at).toLocaleString('en-US',{timeZone:'America/Chicago',dateStyle:'medium',timeStyle:'medium'})+' Central';if(screenshotVersion!==shot.version){image.src=shot.url;document.getElementById('full-screenshot').href=shot.url;screenshotVersion=shot.version}image.hidden=false;document.getElementById('capture-hint').hidden=false}else{document.getElementById('capture-status').textContent='Waiting for the first dashboard capture.';document.getElementById('latest-screenshot').hidden=true;document.getElementById('capture-time').textContent='';document.getElementById('capture-hint').hidden=true;screenshotVersion=null}}async function act(action){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);document.getElementById('result').textContent='Working…';try{const r=await fetch('/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Session-Watch-Token':token},body:JSON.stringify({version})});const d=await r.json();if(!r.ok)throw Error(d.error);document.getElementById('result').textContent=action==='acknowledge'?'Alert acknowledged.':action==='login'?'Sign in in the opened browser, then save the session.':'Done.'}catch(e){document.getElementById('result').textContent=e.message}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);await refresh()}}refresh();setInterval(()=>refresh().catch(()=>{document.getElementById('status').textContent='Control service is unavailable'}),2000);</script></html>'''
 
 
 def handler_for(controller, token):

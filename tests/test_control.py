@@ -128,3 +128,18 @@ def test_latest_screenshot_metadata_timestamp_and_http_image(controller):
             assert client.get(url + info['url']).status_code == 404
     finally:
         server.shutdown(); server.server_close(); thread.join()
+
+
+def test_countdown_uses_only_current_watchers_schedule(controller):
+    from session_watch.core import atomic_write
+    worker = Mock()
+    worker.pid = 123
+    worker.poll.return_value = None
+    controller.worker = worker
+    state = {'pid': 123, 'phase': 'waiting', 'next_capture_at': 2000000000, 'interval_seconds': 90}
+    atomic_write(controller.root / 'monitor-state.json', json.dumps(state))
+    result = controller.status()
+    assert result['timing'] == state
+    assert isinstance(result['server_time'], float)
+    worker.pid = 456
+    assert controller.status()['timing'] is None

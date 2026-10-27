@@ -178,3 +178,9 @@ its original timestamp. Screenshot responses are local only, are not cached, and
 block embedding from other origins.
 
 Set `alerts.volume` between 0 and 1. The current default is 1.0, maximum alert playback level. Actual loudness still follows the current Mac output volume and mute setting.
+
+A thin white countdown bar runs along the top edge of the screenshot, draining
+as the scheduled next capture approaches. The countdown uses the watcher's actual
+randomized delay and switches to Capturing or Comparing while a check runs. It
+shows a paused/sign-in state without a fabricated countdown when monitoring stops.
+Capture times remain in Central time.

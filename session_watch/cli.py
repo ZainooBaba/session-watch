@@ -23,14 +23,21 @@ def emit(root, result):
         stream.write(line + "\n")
 
 
+def monitor_state(root, phase, **values):
+    atomic_write(root / 'monitor-state.json', json.dumps({
+        'phase': phase, 'pid': os.getpid(), 'updated_at': time.time(), **values}))
+
+
 def check(config, root, browser):
     baseline = root / "baseline.json"
     before = json.loads(baseline.read_text()) if baseline.exists() else None
+    monitor_state(root, "capturing")
     after = browser.capture()
     visual = None
     if config.get("screenshots", {}).get("enabled") and not after.get("auth_signals"):
         from .visual import capture_visual
         visual = capture_visual(browser, root, config["screenshots"])
+    monitor_state(root, "analyzing")
     result = decide(before, after, config)
     if visual:
         result["visual"] = visual
@@ -85,11 +92,14 @@ def run(args):
                         return 1
                 else:
                     if outcome == "auth_expired":
+                        monitor_state(root, "paused")
                         print("Human login required. Run session-watch login, then restart watch.", file=sys.stderr)
                         return 2
                     if args.command == "check":
                         return 3 if outcome == "uncertain" else 0
-                time.sleep(next_interval(config))
+                delay = next_interval(config)
+                monitor_state(root, "waiting", interval_seconds=delay, next_capture_at=time.time() + delay)
+                time.sleep(delay)
 
 
 def main():
