@@ -2,10 +2,9 @@
 import argparse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit
 import json
 import re
-from http.cookies import SimpleCookie
 import os
 from pathlib import Path
 import secrets
@@ -337,33 +336,10 @@ def handler_for(controller, token):
             host = urlsplit(controller.tunnel.status().get('url') or '').netloc
             return self.local_request() or bool(host and self.headers.get('Host') == host)
 
-        def allowed(self):
-            if self.local_request():
-                return True
-            cookie = SimpleCookie()
-            try:
-                cookie.load(self.headers.get('Cookie', ''))
-            except Exception:
-                return False
-            value = cookie.get('sw-access')
-            return bool(value and secrets.compare_digest(value.value, controller.tunnel.secret))
-
         def do_GET(self):
             if not self.valid_host():
                 return self.reply({'error': 'Invalid host'}, 403)
             parsed = urlsplit(self.path)
-            access = parse_qs(parsed.query).get('access', [''])[0]
-            if not self.local_request() and parsed.path == '/' and access and secrets.compare_digest(access, controller.tunnel.secret):
-                self.send_response(303)
-                self.send_header('Location', '/')
-                self.send_header('Set-Cookie', 'sw-access=' + controller.tunnel.secret + '; Path=/; HttpOnly; Secure; SameSite=Lax')
-                self.send_header('Cache-Control', 'no-store')
-                self.send_header('Referrer-Policy', 'no-referrer')
-                self.send_header('Content-Length', '0')
-                self.end_headers()
-                return
-            if not self.allowed():
-                return self.reply({'error': 'Open the private access link from Setup.'}, 403)
             if parsed.path == '/':
                 return self.reply(PAGE.replace('__TOKEN__', token), content_type='text/html; charset=utf-8')
             if parsed.path == '/status':
@@ -399,7 +375,7 @@ def handler_for(controller, token):
                 return self.reply({'error': str(exc)}, 400)
             origin = self.headers.get('Origin')
             expected = f'http://127.0.0.1:{self.server.server_port}' if self.local_request() else controller.tunnel.status().get('url')
-            if (not self.valid_host() or not self.allowed() or self.headers.get('X-Session-Watch-Token') != token
+            if (not self.valid_host() or self.headers.get('X-Session-Watch-Token') != token
                     or (origin is not None and origin != expected)):
                 return self.reply({'error': 'Forbidden'}, 403)
             try:

@@ -73,9 +73,9 @@ The control page fits the viewport with Home, Dashboard, Alerts, and Setup tabs.
 
 ## Remote access tunnel
 
-In **Setup → Tunnel**, choose **Start Tunnel** to run `cloudflared tunnel --url http://127.0.0.1:8765`. Install cloudflared first if needed (`brew install cloudflared` on macOS). The app displays a private access link once Cloudflare assigns its temporary address. Open that link on another device; it establishes an authenticated browser cookie. The plain tunnel URL cannot read the dashboard or controls without the private link. The existing action token and same-origin checks also protect writes.
+In **Setup → Tunnel**, choose **Start Tunnel** to run `cloudflared tunnel --url http://127.0.0.1:8765`. Install cloudflared first if needed (`brew install cloudflared` on macOS). Once connected, choose **Open public share link** or **Copy public link**. The plain address opens the full app with read/write controls, without a private link or cookie setup. Anyone with the link can see screenshots and alerts, dismiss alerts, change settings, sign out, and stop the app. Action-token and same-origin checks still protect against unrelated sites submitting actions.
 
-**Stop Tunnel** terminates the tunnel owned by this app and invalidates its private link. Starting it again creates a fresh link. Stopping Session Watch also closes the tunnel. It does not terminate unrelated cloudflared processes. Quick Tunnel behavior is documented by [Cloudflare](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
+**Stop Tunnel** terminates the tunnel owned by this app. Starting it again creates a new address. Stopping Session Watch also closes the tunnel. Unrelated cloudflared processes are unaffected. Quick Tunnel behavior is documented by [Cloudflare](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
 
 ## Sounds and status
 

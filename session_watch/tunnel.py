@@ -1,6 +1,5 @@
 """Own one on-demand Cloudflare Quick Tunnel for this control service."""
 import re
-import secrets
 import shutil
 import subprocess
 import threading
@@ -10,7 +9,6 @@ from pathlib import Path
 class Tunnel:
     def __init__(self, root):
         self.root, self.process, self.url, self.error = root, None, None, None
-        self.secret = secrets.token_urlsafe(32)
         self.connected = False
         self.lock = threading.RLock()
 
@@ -18,7 +16,7 @@ class Tunnel:
         with self.lock:
             running = bool(self.process and self.process.poll() is None)
             return {'running': running, 'url': self.url if running else None,
-                    'access_url': self.url + '/?access=' + self.secret if running and self.url and self.connected else None,
+                    'access_url': self.url if running and self.url and self.connected else None,
                     'error': self.error, 'starting': running and not self.connected}
 
     def start(self, port):
@@ -31,7 +29,7 @@ class Tunnel:
             if not executable:
                 raise ValueError('Install cloudflared, then start the tunnel again.')
             self.connected = False
-            self.url, self.error, self.secret = None, None, secrets.token_urlsafe(32)
+            self.url, self.error = None, None
             self.process = subprocess.Popen([executable, 'tunnel', '--url', f'http://127.0.0.1:{port}', '--no-autoupdate'],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1)
@@ -61,7 +59,6 @@ class Tunnel:
             process, self.process = self.process, None
             self.url, self.error = None, None
             self.connected = False
-            self.secret = secrets.token_urlsafe(32)
             if process and process.poll() is None:
                 process.terminate()
                 try:
