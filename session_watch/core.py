@@ -91,6 +91,8 @@ def evidence(before: dict, after: dict, budget: int) -> dict:
     return {
         "previous_url": safe_url(before["url"]), "current_url": safe_url(after["url"]),
         "status": after["status"], "auth_signals": after.get("auth_signals", []),
+        "visual_change": after.get("visual", {}).get("classification"),
+        "authenticated_dashboard_verified": after.get("authenticated_verified", False),
         "previous_html": old[:part], "current_html": new[:part],
         "diff": diff[:part * 2],
         "truncated": len(old) > part or len(new) > part or len(diff) > part * 2,
@@ -105,7 +107,7 @@ def classify(before: dict, after: dict, config: dict) -> dict:
         with httpx.Client(timeout=settings.get("timeout_seconds", 120), trust_env=False) as client:
             response = client.post(settings.get("base_url", "http://127.0.0.1:11434").rstrip("/") + "/api/chat", json={
                 "model": settings["model"], "stream": False, "format": SCHEMA,
-                "options": {"temperature": 0},
+                "options": {"temperature": 0, "num_ctx": settings.get("context_length", 8192)},
                 "messages": [{"role": "system", "content": SYSTEM},
                              {"role": "user", "content": json.dumps(payload)}],
             })
@@ -127,6 +129,9 @@ def classify(before: dict, after: dict, config: dict) -> dict:
     if after.get("auth_signals"):
         result = {"classification": "auth_expired", "confidence": 1,
                   "reason": "; ".join(after["auth_signals"])}
+    elif result['classification'] == 'auth_expired' and after.get('authenticated_verified'):
+        result = {'classification': 'uncertain', 'confidence': 0,
+                  'reason': 'The model suspected sign-in expiry, but the authenticated dashboard is still verified. Review this change for invitations.'}
     return result
 
 
@@ -135,7 +140,7 @@ def decide(before: dict | None, after: dict, config: dict, classifier=classify) 
         if after.get("auth_signals"):
             return {"classification": "auth_expired", "advance": False}
         return {"classification": "baseline_created", "advance": True}
-    if digest(before["html"]) == digest(after["html"]) and not after.get("auth_signals"):
+    if digest(before["html"]) == digest(after["html"]) and not after.get("auth_signals") and after.get("visual", {}).get("classification") != "visual_change":
         return {"classification": "unchanged", "advance": False}
     result = classifier(before, after, config)
     return {**result, "advance": result["classification"] == "content_change"}

@@ -247,3 +247,37 @@ def test_signed_out_screenshot_is_not_served_and_stop_endpoint_shuts_server(cont
         assert not thread.is_alive()
     finally:
         server.shutdown(); server.server_close(); thread.join()
+
+
+def test_invite_review_stays_pinned_while_alerting(controller):
+    review={'classification':'content_change','stage1':{'classification':'content_change','reason':'New invitation row'},
+            'invite':{'classification':'possible_invite','confidence':.5,'reason':'Review new pending program','evidence':''},
+            'pager_event_id':'test-event'}
+    controller.notify(review)
+    (controller.root/'latest-analysis.json').write_text(json.dumps({'stage2':{'classification':'not_interview_invite'}}))
+    assert controller.status()['analysis']['stage2']['reason']=='Review new pending program'
+    controller.notify({'classification':'unchanged'})
+    assert controller.status()['analysis']['stage2']['reason']=='Review new pending program'
+    controller.acknowledge()
+    assert controller.status()['analysis']['stage2']['classification']=='not_interview_invite'
+
+
+def test_pager_settings_are_saved_privately_without_returning_the_key(controller):
+    server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(controller,'secret'))
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    url=f'http://127.0.0.1:{server.server_port}'
+    key='b'*32
+    try:
+        with httpx.Client(trust_env=False) as client:
+            assert client.post(url+'/pager-config',json={'routing_key':key,'enabled':True}).status_code==403
+            response=client.post(url+'/pager-config',json={'routing_key':key,'enabled':True},headers={'X-Session-Watch-Token':'secret'})
+            assert response.status_code==200
+            status=client.get(url+'/status')
+            assert status.json()['pager']['configured']
+            assert key not in status.text
+            response=client.post(url+'/pager-config',json={'enabled':False},headers={'X-Session-Watch-Token':'secret'})
+            assert response.status_code==200
+            assert not client.get(url+'/status').json()['pager']['configured']
+        assert (controller.root/'pager-settings.json').stat().st_mode & 0o077==0
+    finally:
+        server.shutdown();server.server_close();thread.join()

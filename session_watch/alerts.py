@@ -4,9 +4,13 @@ import sys
 from pathlib import Path
 
 
-def alert_kind(result):
+def alert_kind(result, invite_only=False):
     if result.get('classification') == 'auth_expired':
         return 'login'
+    if result.get('invite', {}).get('classification') in {'interview_invite', 'possible_invite'}:
+        return 'change'
+    if invite_only:
+        return None
     if (result.get('classification') == 'content_change'
             or result.get('visual', {}).get('classification') == 'visual_change'):
         return 'change'
@@ -15,7 +19,7 @@ def alert_kind(result):
 
 def play_alert(config, result, root=None):
     settings = config.get('alerts', {})
-    kind = alert_kind(result)
+    kind = alert_kind(result, settings.get('invite_only', False))
     if not settings.get('enabled', False) or kind is None:
         return None
     if settings.get('persistent') and root is not None:

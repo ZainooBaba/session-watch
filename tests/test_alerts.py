@@ -37,3 +37,10 @@ def test_failed_audio_is_nonfatal(monkeypatch):
     monkeypatch.setattr(subprocess,'run',Mock(side_effect=OSError('unavailable')))
     result=play_alert({'alerts':{'enabled':True}},{'classification':'auth_expired'})
     assert not result['played'] and result['error']
+
+
+def test_invite_only_mode_alerts_for_possible_but_not_generic_changes():
+    assert alert_kind({'classification':'content_change'},invite_only=True) is None
+    assert alert_kind({'classification':'uncertain','invite':{'classification':'possible_invite'}},invite_only=True)=='change'
+    assert alert_kind({'classification':'content_change','invite':{'classification':'not_interview_invite'}},invite_only=True) is None
+    assert alert_kind({'classification':'auth_expired'},invite_only=True)=='login'

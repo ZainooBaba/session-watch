@@ -1,221 +1,135 @@
 # Session Watch
 
-Monitor a website behind a human login. Refresh its rendered HTML on a schedule, detect changes, and ask a locally hosted Ollama model whether the page changed or the login expired.
+A local interview-invitation monitor for an authenticated dashboard such as Thalamus. A human signs in once; the app saves the session, refreshes the dashboard, compares HTML and screenshots, and runs two local LLM checks. New **and possible** interview invitations trigger a repeating local sound. **Only confirmed new interview invitations trigger PagerDuty.**
 
-## How it works
+The policy favors recall: an ambiguous meaningful change or a failed invitation classifier alerts for review instead of silently risking a missed invitation. Existing invitations present in the initial baseline are not treated as new.
 
-1. `login` opens Chromium. You complete sign-in, SSO, and MFA yourself.
-2. Cookies, localStorage, IndexedDB, and sessionStorage are saved locally.
-3. `watch` opens the target with that saved session, revisits the configured URL on the configured schedule, waits for rendering, and compares serialized HTML.
-4. Identical HTML makes no LLM request. Changed HTML produces redacted before/after excerpts and a diff for Ollama.
-5. A confident `content_change` emits an event, saves change evidence, and advances the baseline.
-6. `auth_expired` stops the watcher with exit code 2. Log in again and restart. The old content baseline remains, so changes made during expiry can still be detected.
-7. `uncertain`, model failures, and browser/server errors retain the baseline. Uncertain results retry on the next cycle. No automated password entry.
+## How the two checks work
 
-Configured login redirects, login elements, missing authenticated elements, and HTTP 401/403 override the model. A 403 can mean permission loss rather than an expired session; either needs human review. Model judgments are probabilistic. Configure `authenticated_selector` for your site to improve reliability.
+1. Playwright reloads the dashboard with saved authentication. Identical HTML and screenshots require no LLM call.
+2. **Change check:** a local Ollama model distinguishes dashboard changes, expired authentication, and uncertainty. Configured login URLs/elements, HTTP 401/403, and a missing authenticated selector take priority. A model's unsupported login guess cannot override a verified authenticated dashboard.
+3. **Invitation check:** a separate structured LLM call compares the old and new dashboard text and focused diff. It returns `interview_invite`, `possible_invite`, or `not_interview_invite`, with confidence, explanation, and a quote when available. Both passes can use the same local model; `[invites.llm]` optionally overrides settings for pass two.
+4. Meaningful text or screenshot changes still reach pass two when pass one is uncertain. Only a sufficiently confident non-invitation result suppresses an invitation alert. An increasing total/pending invitation counter or an unexplained screenshot-only change is kept as a possible invitation even if the text model tries to rule it out.
+5. Confirmed new invitations require a verifiable new text quote. An unverifiable claim is downgraded to **possible**, which still alerts locally but never pages. Failed/invalid/offline pass-two responses also become possible local alerts. Routine invisible script/token changes do not page you.
+6. The control page displays both decisions, reasons, and quoted evidence. An active alert's review stays pinned while later screenshots arrive. All decisions are local; this does not reveal hidden model reasoning.
 
-## Install
+The text-only model cannot interpret image pixels. Screenshot-only differences can therefore produce possible-invite false positives, including layout/font noise. This is intentional under the recall-first policy. Classification is probabilistic and does not guarantee every invitation will be detected.
 
-Requires Python 3.11+, a desktop for human login, and a running [Ollama](https://ollama.com/download) server. Local inference has no per-request API fee; it uses your own hardware. Model speed and memory needs vary.
+## Install and run
+
+Requires Python 3.11+, Chromium, a desktop for human login, and a running [Ollama](https://ollama.com/download) server. Inference runs on your hardware without a per-request model API fee.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[test]'
 playwright install chromium
-# Linux servers may need: playwright install --with-deps chromium
+# Linux may require: playwright install --with-deps chromium
 cp config.example.toml config.toml
-```
-
-Install Ollama, start its service, and fetch a model (the model name is configurable):
-
-```sh
 ollama pull qwen3:8b
-# If Ollama is not already running:
+# Start Ollama if it is not already running:
 ollama serve
 ```
 
-Edit `config.toml` with your target URL. Set `authenticated_selector` to a stable CSS selector visible only when signed in, such as an account menu. Set `ready_selector` to the actual content region if it renders asynchronously. Adapt `login_url_patterns` and optionally `login_selector` to the site's sign-in flow.
+Edit `config.toml` with the monitored URL and an installed local model name. The running Thalamus setup can also use `mistral:latest`. Set `authenticated_selector` to a stable element visible only after login; for the Thalamus dashboard this can be `thal-dashboard`. `invites.selector` limits invitation text to the dashboard region; if it does not match, text extraction falls back to the page.
 
-```sh
-session-watch login
-session-watch check
-session-watch watch
-```
-
-Log in using the opened browser. Once the target content is visible, press Enter in the terminal. Keep that browser open until the session-saved message appears. The login command revisits the target to confirm session reuse before saving. For diagnosis, use `session-watch check --headed`.
-
-When authentication expires, run `session-watch login`, then `session-watch watch` again. A single lock prevents simultaneous login/watch commands from overwriting each other's saved state. Stop a running watcher before logging in. All commands accept `--config /path/to/config.toml`; state paths are relative to that configuration file.
-
-The first successful check creates the baseline. There is no prior page to classify on that check. Human login plus configured authentication checks establish the initial page.
-
-## Refresh timing
-
-The example configuration uses a truncated normal distribution: mean 90 seconds,
-standard deviation 15 seconds, and strict bounds of 60–120 seconds. Samples outside
-the bounds are redrawn. The delay begins after each check completes; page loading
-and LLM inference add to the time between navigation starts. Remove `[refresh]`
-to use the fixed `interval_seconds` setting instead.
-
-```toml
-[refresh]
-distribution = "truncated_normal"
-min_seconds = 60
-max_seconds = 120
-mean_seconds = 90
-stddev_seconds = 15
-```
-
-## Results
-
-Console output and `.session-watch/events.jsonl` contain timestamped JSON events. Changed or uncertain pages also create `.session-watch/changes/<id>.json` with the verdict and redacted HTML evidence. No emails or messages are sent. Pipe events to a notification system if needed.
-
-Example:
-
-```json
-{"classification":"content_change","confidence":0.95,"reason":"An item was added to the account table","advance":true}
-```
-
-`check` exits 0 for a baseline, unchanged page, or confirmed change; 1 for errors; 2 for human login/access review; 3 for uncertainty. `watch` retries transient errors and uncertainty, and exits on auth expiry. Interrupt it with Ctrl+C.
-
-## HTML comparison and privacy
-
-By default, every difference in `page.content()` counts, including scripts, attributes, and dynamic values. This compares the rendered document, not HTTP source bytes, screenshots, shadow DOM, or the contents of separate iframes. `ignore_selectors` and `ignore_attributes` optionally suppress known noisy markup before comparison. A page change that normalizes away will not call the model.
-
-The classifier removes scripts, styles, form values, common token attributes, and URL query strings before sending evidence to the configured Ollama server. Evidence is bounded to avoid oversized prompts; truncation is explicit. Without an authenticated selector, truncated evidence cannot confidently advance the baseline. Scripts-only changes can be uncertain after redaction; the original local baseline is retained.
-
-The default model endpoint is your machine at `127.0.0.1:11434`. Cookies and storage files are never included in model requests. Redaction cannot guarantee all secrets are removed from arbitrary HTML; visible page data can still be sensitive. A remote `llm.base_url` sends that evidence to that server. Website content is treated as untrusted input, and model output is validated; do not treat classification as an access-control boundary.
-
-State files and raw baseline HTML stay in `.session-watch/`, excluded by `.gitignore`. New state directories/files use private permissions. Keep backups private too. Don't commit sessions, custom configs containing secrets, or snapshot files. Keep `state_dir` in an ignored local directory. Change artifacts accumulate; remove old ones according to your retention needs.
-
-Saved state covers common browser auth, but is not a full browser profile. Device-bound credentials, passkeys, anti-bot challenges, and some SSO mechanisms may require site-specific handling or a fresh human login. Only top-level open-page sessionStorage is saved. Monitoring runs on your machine, not in GitHub Actions; CI only tests the project.
-
-## Development
-
-```sh
-pytest -q
-```
-
-Unit tests exercise baseline preservation, offline/invalid model responses, confidence thresholds, redaction, and truncation. The browser integration test uses a local HTTP fixture, real Chromium, and a mocked model to exercise saved login state, unchanged content, content updates, expired login, and recovery. CI runs tests on Python 3.11–3.13.
-
-Implementation references: [Playwright authentication](https://playwright.dev/python/docs/auth), [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
-
-## Publish to GitHub
-
-From this project directory, with an authenticated GitHub CLI:
-
-```sh
-git init -b main
-git add .
-git commit -m "Build authenticated website change monitor"
-gh repo create session-watch --private --source=. --remote=origin --push
-```
-
-Use a private repository by default. No website URL or credentials are bundled.
-
-## Screenshot comparison
-
-With `[screenshots] enabled = true`, each successfully authenticated capture also
-saves a full-page screenshot at a fixed 1280 × 900 viewport. Local pixel comparison
-uses a per-channel tolerance of 20 and flags a visual change when at least 0.1%
-of pixels differ or dimensions change. Animations and the text caret are hidden
-for capture. This is a visual difference detector; it does not judge the meaning
-of a screenshot or send images to the text-only Mistral/Ollama classifier.
-
-The `visual` field in each event reports the result and changed percentage.
-`.session-watch/screenshots/` contains `previous.png`, `latest.png`, and
-`latest-diff.png` (changed pixels highlighted in pink). Flagged changes also keep
-timestamped before/after/diff images. The screenshot baseline advances after every
-authenticated capture, independently of the HTML verdict, and is preserved on
-auth failure. No screenshot is taken of the login screen. Screenshots may contain
-private dashboard information; they stay local and are excluded from GitHub.
-
-## Sound alerts (macOS)
-
-`[alerts] enabled = true` plays **Basso three times** when human login/access review
-is required, and **Glass twice** for a confident HTML content change or a flagged
-screenshot change. An auth result takes priority over any visual verdict. Uncertain
-HTML alone, unchanged checks, and initial baselines stay silent. Screenshot changes
-use the configured pixel threshold and can include layout or dynamic visual noise;
-the sound does not mean a new invitation was semantically confirmed.
-
-The watcher records `audio_alert` in its event log, including playback failures.
-Sound failures do not stop monitoring. On auth expiry the login sound finishes
-before the watcher stops for human sign-in. Output uses the current system audio
-device and volume, with afplay volume set to 1.0 (maximum); muted output cannot be overridden.
-Set `login_sound` and `change_sound` to built-in macOS sound names, or disable
-`alerts.enabled` to mute. Other operating systems log that audio is unsupported.
-
-## Persistent alerts and local control panel
-
-Start the supervisor instead of the standalone watcher for repeating sounds:
+Start the supervisor:
 
 ```sh
 python -m session_watch.control --config config.toml
 ```
 
-Open `http://127.0.0.1:8765`. The supervisor starts monitoring and keeps an alert
-sounding every eight seconds until you choose **Silence alert / acknowledge**.
-Login alerts continue even after the watcher stops for sign-in. Acknowledgment
-silences the current alert; a new detected change can trigger another one.
-The single **Sign in** button opens the login browser and silences the current
-sound. Complete sign-in, then the same button becomes **I’m signed in**: click
-it to save the session and automatically resume monitoring. When a valid saved
-session is simply paused, the button offers **Resume monitoring** instead.
+Open **http://127.0.0.1:8765**. The page has one guided sign-in button:
 
-The control page binds only to loopback, rejects other Host/Origin values, and
-requires a private local token for state changes. Do not expose this server to
-a network. Active alerts survive supervisor restarts. The current tone may finish
-after acknowledgment. If the control service is unavailable, the watcher falls
-back to one sound sequence and logs the failure to establish persistent playback.
-Running the supervisor and a standalone watcher against the same state directory
-at the same time is prevented by the monitor lock.
+1. Click **Sign in** to open Chromium and complete sign-in/SSO/MFA yourself.
+2. The same button becomes **I'm signed in**. Click it to verify the dashboard, save the session, and automatically resume monitoring.
 
-The control page displays the most recent authenticated dashboard screenshot with
-its capture time in America/Chicago (Central). It checks for updates every two
-seconds and refreshes the image when a new capture is saved. Select the image to
-open it full size. A paused watcher keeps showing the last successful capture with
-its original timestamp. Screenshot responses are local only, are not cached, and
-block embedding from other origins.
+When monitoring is already healthy, the button says **Sign in again**. When a saved session is simply paused, it offers **Resume monitoring**. Stop an older standalone watcher before starting the supervisor; a lock prevents concurrent use of the same session state.
 
-Set `alerts.volume` between 0 and 1. The current default is 1.0, maximum alert playback level. Actual loudness still follows the current Mac output volume and mute setting.
+The first authenticated check creates the comparison baseline. Cookies, localStorage, IndexedDB, and top-level open-page sessionStorage are saved privately. Login failures never replace a good baseline. Device-bound/passkey authentication and some anti-bot/SSO mechanisms may require additional site-specific handling.
 
-A thin white countdown bar runs along the top edge of the screenshot, draining
-as the scheduled next capture approaches. The countdown uses the watcher's actual
-randomized delay and switches to Capturing or Comparing while a check runs. It
-shows a paused/sign-in state without a fabricated countdown when monitoring stops.
-Capture times remain in Central time.
+## PagerDuty setup
 
-## Monitor status dot
+The app uses [PagerDuty Events API v2](https://docs.pagerduty.com/developer/events-api-v2-overview). Create or choose an Events API v2 integration on the PagerDuty service that should notify you, and copy its **Integration Key / routing key**. This is not a general REST API key.
 
-The status dot pulses yellow while monitoring is active, stays red for a detected
-change alert, stays green for sign-in or other required action, and is gray when
-idle/disconnected. An unresolved login takes priority over a change alert.
-Alert/attention state is persisted separately from screenshots: new captures,
-normal checks, page reloads, and service restarts cannot clear it. Acknowledgment
-clears the latched alert; successful session saving also acknowledges it. Opening
-the login browser silences the current sound but keeps the sign-in indicator green
-until acknowledged or login is completed. A known red/green state is retained
-if the control page temporarily loses its connection. Reduced-motion preferences
-disable the yellow pulse.
+In the local page, expand **PagerDuty setup**, paste that key, and choose **Enable PagerDuty**. The key stays in a private local state file and is never returned by the status API or committed. The app does not send a test incident automatically. Enabling delivery also sends any queued confirmed-invite alerts. **Disable** pauses outbound delivery while local monitoring continues.
 
-The sign-in section has one button and one instruction. While monitoring is
-healthy it says **Sign in again**; after opening the browser it says
-**I’m signed in**. Saving also restarts monitoring, so there is no separate
-save/resume decision. Each action checks the current step to avoid accidentally
-submitting a stale action after the page’s state changes.
+- Only confirmed new interview invites create critical trigger events. Possible invites, model uncertainty/failures, sign-in requests, screenshot-only ambiguity, and unrelated changes never trigger PagerDuty. PagerDuty handles recipients, escalation, phone/push/SMS behavior, and acknowledgments according to your service settings.
+- Payloads contain a generic invitation/review message, event identifier, classification, and confidence. No dashboard HTML, screenshots, program names, or private interview details are sent.
+- Alerts are stored in a durable outbox before the content baseline advances. If PagerDuty is unconfigured or unavailable, they remain queued rather than being discarded.
+- The supervisor retries unconfirmed deliveries independently of the watcher, including when it is paused for login. Signing out pauses delivery until signing in again; stopping the app stops the sender.
+- A stable event key is reused for retries via PagerDuty's `dedup_key`. Known accepted events are not resent. The page reports **accepted by PagerDuty**, which is not proof a phone notification was delivered. PagerDuty deduplication applies to the corresponding open alert.
+- The supervisor checks pending delivery every 15 seconds, with increasing retry backoff after failures. The endpoint is `https://events.pagerduty.com/v2/enqueue`.
+
+For headless configuration, `[pager] enabled = true` can use the `PAGERDUTY_ROUTING_KEY` environment variable. No key is bundled with the project.
+
+## Sounds and status
+
+With `[alerts] invite_only = true`, generic non-invitation changes stay informational. Local sounds repeat every eight seconds until acknowledged:
+
+- **Basso three times:** human sign-in/access review required.
+- **Glass twice:** confirmed or possible interview invitation (local sound; PagerDuty is confirmed-only).
+
+On macOS, `alerts.volume = 1.0` uses maximum afplay playback level, subject to your system output volume and mute setting. Sound failures are logged and do not stop monitoring. If the supervisor is unavailable, the watcher falls back to one sound sequence and reports that persistent playback could not be established. Audio currently supports macOS only.
+
+**Silence & acknowledge** stops the current local alert; a new event can start another. A current tone may finish. Acknowledge PagerDuty incidents in PagerDuty separately. The status dot is:
+
+- Pulsing yellow while active.
+- Red for a new/possible invitation alert.
+- Green for sign-in or another required action.
+- Gray while idle or disconnected.
+
+Unresolved login takes priority. Alert/attention state survives new screenshots, unchanged checks, page reloads, and service restarts until acknowledged or resolved. A known red/green state is retained during a temporary page connection loss. Reduced-motion preferences disable the pulse.
+
+## Captures and refresh timing
+
+The page shows the latest screenshot and its capture time in **America/Chicago (Central)**. It polls every two seconds, updating the image only when a new capture is saved. Select the image to open it full size. A paused watcher retains the last successful capture and original timestamp.
+
+The thin white bar along the top of the screenshot drains toward the actual next scheduled capture. It switches to Capturing, Comparing, Checking for invitations, or a paused/sign-in state as appropriate. It does not invent a countdown while stopped.
+
+The default schedule uses a truncated normal distribution: mean **90 seconds**, standard deviation **15 seconds**, bounds **60–120 seconds**. Out-of-bounds samples are redrawn. Delay begins after a check finishes; loading and LLM inference add to the time between navigation starts. Remove `[refresh]` to use fixed `interval_seconds`.
+
+HTML comparison uses the rendered `page.content()` document, including scripts and attributes. Optional `ignore_selectors` and `ignore_attributes` suppress known noise. This is not screenshot OCR, shadow-DOM extraction, or separate-iframe source comparison.
+
+Screenshot comparison uses a 1280 × 900 viewport and a full-page PNG, hides animations/carets, and flags differences when at least **0.1%** of pixels exceed a per-channel tolerance of **20**, or image dimensions change. It saves before/after images and a pink-highlighted difference image. The screenshot baseline advances on authenticated captures independently of the invitation review. Login pages are not captured.
 
 ## Sign out and stop
 
-The footer has two separate controls, each with a confirmation explaining its effect:
+The footer offers two controls with explanations before confirmation:
 
-- **Sign out** stops monitoring, closes the monitor/login browser, silences alerts,
-  and removes the saved cookies/storage files from this Mac. The control page stays
-  available, and its screenshot is hidden while signed out. This clears Session
-  Watch's local login; it does not revoke other Thalamus sessions or remote tokens.
-  Existing history stays local. The next successful sign-in starts a fresh comparison
-  baseline, so images from a previous account are not shown as the current capture.
-- **Stop app** stops monitoring, login windows, repeating alerts, and the local
-  control server. It keeps the saved login and does not stop a shared Ollama service.
-  The page displays Stopped and stops polling. Start the control supervisor again
-  (or ask the assistant) to run Session Watch later.
+- **Sign out:** stops the watcher and login browser, silences local alerts, removes saved authentication from this Mac, and hides the dashboard screenshot/review. Existing history stays local. This clears Session Watch's login, not other Thalamus sessions or remote tokens. Next successful sign-in starts a fresh content/screenshot baseline.
+- **Stop app:** stops the watcher, login browser, audio, PagerDuty sender, and control service while retaining saved login and queued events. It does not stop a shared Ollama server. Start the supervisor again, or ask the assistant, to resume.
+
+## Local state and privacy
+
+`.session-watch/` is ignored by Git. New state directories/files have private permissions. Contents include:
+
+- `storage.json`, `session.json`: saved authentication; never sent to an LLM or PagerDuty.
+- `baseline.json`: raw rendered baseline HTML.
+- `events.jsonl`: timestamped monitor decisions and local alert results.
+- `changes/`: redacted old/new excerpts, focused diffs, and verdicts.
+- `screenshots/`: latest/previous/diff PNGs and timestamped visual changes.
+- `latest-analysis.json`, `active-alert.json`, `attention.json`: review and latched alert state.
+- `pager-settings.json`: private routing key and enable setting.
+- `pager-outbox/`: durable queued/accepted minimal notification records.
+
+Model evidence removes scripts, styles, form values, common token attributes, and URL query strings, and bounds input size. Redaction is not guaranteed anonymization; visible dashboard content can still be sensitive. The default endpoint is local `127.0.0.1:11434`; setting a remote LLM URL sends that evidence to the remote server. Page text is treated as untrusted data and structured model outputs are validated.
+
+The control page binds only to loopback, checks Host/Origin, and requires a private token for state changes. Images are served without caching and blocked from cross-origin embedding. Do not expose the server to a network. History accumulates; keep backups private and apply your preferred retention policy.
+
+## CLI and development
+
+The standalone CLI remains available for diagnostics:
+
+```sh
+session-watch login
+session-watch check --headed
+session-watch watch
+pytest -q
+```
+
+Use the supervisor for persistent audio, the control page, and PagerDuty retries. `check` exits 0 for a baseline/unchanged/confirmed first-pass change, 1 for errors, 2 for login/access review, and 3 for a first-pass uncertain result. In invitation mode, a meaningful uncertain change can still produce a possible-invite alert and advance the baseline after queuing it. `watch` retries transient capture failures and stops on authentication expiry.
+
+Tests cover session persistence and expiry with real Chromium against a local fixture, focused HTML diffs, screenshot comparisons, timing, latched state, sign-in/sign-out/shutdown, both LLM decision gates, recall-first fallbacks, private PagerDuty settings, queued retries, and deduplication. PagerDuty tests mock outbound delivery and never create real incidents. CI runs Python 3.11–3.13.
+
+Implementation references: [Playwright authentication](https://playwright.dev/python/docs/auth), [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs), [PagerDuty trigger events](https://docs.pagerduty.com/developer/api/reference/events-v2/send-event/create-v2-event).

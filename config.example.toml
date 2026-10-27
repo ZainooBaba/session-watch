@@ -34,8 +34,20 @@ minimum_changed_ratio = 0.001
 
 [alerts]
 enabled = true
+invite_only = true
 volume = 1.0
 persistent = true
 repeat_seconds = 8
 login_sound = "Basso"
 change_sound = "Glass"
+
+[invites]
+enabled = true
+# Omit selector to use all page text; this is suitable for Thalamus dashboards.
+selector = "thal-dashboard"
+max_input_chars = 16000
+minimum_no_invite_confidence = 0.95
+
+[pager]
+enabled = false
+# Add the PagerDuty Events API v2 integration key using the local control page.

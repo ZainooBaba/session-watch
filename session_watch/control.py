@@ -18,6 +18,7 @@ from filelock import FileLock
 from .alerts import alert_kind, play_alert
 from .core import atomic_write
 from .panel import PAGE
+from . import pager
 
 
 class Controller:
@@ -45,7 +46,7 @@ class Controller:
         atomic_write(self.root / 'attention.json', json.dumps(self.attention))
 
     def notify(self, result):
-        kind = alert_kind(result)
+        kind = alert_kind(result, self.config.get("alerts", {}).get("invite_only", False))
         if kind is None:
             return
         with self.lock:
@@ -55,8 +56,12 @@ class Controller:
                 kind = 'login'
             self.active = {'kind': kind, 'version': self.sequence,
                            'since': self.active['since'] if self.active else datetime.now(timezone.utc).isoformat(),
-                           'count': self.active['count'] + 1 if self.active else 1}
-            self.attention = {'kind': kind}
+                           'count': self.active['count'] + 1 if self.active else 1,
+                           'invite_classification': result.get('invite', {}).get('classification'),
+                           'review': ({'time': datetime.now(timezone.utc).isoformat(), 'stage1': result.get('stage1', {}),
+                                       'stage2': result['invite'], 'pager_event_id': result.get('pager_event_id')}
+                                      if result.get('invite') else None)}
+            self.attention = {'kind': kind, 'invite_classification': result.get('invite', {}).get('classification')}
             self.persist()
         self.wake.set()
 
@@ -80,7 +85,8 @@ class Controller:
             with self.lock:
                 active = dict(self.active) if self.active else None
             if active:
-                result = {'classification': 'auth_expired' if active['kind'] == 'login' else 'content_change'}
+                result = {'classification': 'auth_expired' if active['kind'] == 'login' else 'content_change',
+                          'invite': {'classification': active.get('invite_classification') or 'possible_invite'}}
                 settings = {**self.config, 'alerts': {**self.config.get('alerts', {}), 'persistent': False}}
                 played = play_alert(settings, result)
                 with self.lock:
@@ -88,6 +94,14 @@ class Controller:
                 self.wake.wait(self.config.get('alerts', {}).get('repeat_seconds', 8))
             else:
                 self.wake.wait()
+
+    def pager_loop(self):
+        while not self.closed.is_set():
+            try:
+                pager.dispatch(self.root, self.config)
+            except (OSError, ValueError, TypeError):
+                pass
+            self.closed.wait(15)
 
     def spawn(self, command, stdin=None):
         with (self.root / 'watch.log').open('a') as log:
@@ -128,7 +142,7 @@ class Controller:
                 self.set_attention('login')
                 raise ValueError('Login was not confirmed. Open the login browser and try again.')
             if (self.root / 'signed-out').exists():
-                for name in ['baseline.json', 'screenshots/baseline.png', 'screenshots/latest.png',
+                for name in ['baseline.json', 'latest-analysis.json', 'screenshots/baseline.png', 'screenshots/latest.png',
                              'screenshots/previous.png', 'screenshots/latest-diff.png']:
                     (self.root / name).unlink(missing_ok=True)
                 (self.root / 'signed-out').unlink()
@@ -205,6 +219,12 @@ class Controller:
             latest = None
         if (self.root / 'signed-out').exists():
             latest = None
+        analysis = None
+        try:
+            if not (self.root / 'signed-out').exists():
+                analysis = json.loads((self.root / 'latest-analysis.json').read_text())
+        except (OSError, ValueError):
+            pass
         timing = None
         try:
             data = json.loads((self.root / 'monitor-state.json').read_text())
@@ -213,6 +233,9 @@ class Controller:
         except (OSError, ValueError):
             pass
         with self.lock:
+            if self.active and self.active.get('review'):
+                analysis = self.active['review']
+            pager_info = pager.status(self.root, self.config, (analysis or {}).get('pager_event_id'))
             monitoring = bool(self.worker and self.worker.poll() is None)
             login_open = bool(self.login and self.login.poll() is None)
             needs_login = login_open or (self.active and self.active['kind'] == 'login') or (self.attention and self.attention['kind'] == 'login')
@@ -220,7 +243,9 @@ class Controller:
             if needs_login:
                 indicator = {'state': 'action', 'label': 'Sign-in needed'}
             elif changed:
-                indicator = {'state': 'change', 'label': 'Change alert'}
+                invite_type = (self.active or self.attention or {}).get('invite_classification')
+                label = 'Interview invite' if invite_type == 'interview_invite' else 'Possible invite' if invite_type == 'possible_invite' else 'Change alert'
+                indicator = {'state': 'change', 'label': label}
             elif self.attention:
                 indicator = {'state': 'action', 'label': 'Action needed'}
             elif monitoring:
@@ -229,7 +254,7 @@ class Controller:
                 indicator = {'state': 'idle', 'label': 'Signed out' if (self.root / 'signed-out').exists() else 'Paused'}
             return {'alert': self.active, 'message': self.message, 'screenshot': latest,
                     'attention': self.attention, 'indicator': indicator,
-                    'session': self.session_info(), 'signed_out': (self.root / 'signed-out').exists(),
+                    'session': self.session_info(), 'analysis': analysis, 'pager': pager_info, 'signed_out': (self.root / 'signed-out').exists(),
                     'timing': timing, 'server_time': time.time(),
                     'monitoring': monitoring, 'login_open': login_open}
 
@@ -294,6 +319,8 @@ def handler_for(controller, token):
                     controller.notify(data)
                 elif self.path == '/acknowledge':
                     controller.acknowledge(data.get('version'))
+                elif self.path == '/pager-config':
+                    pager.save_settings(controller.root, data.get('routing_key'), data.get('enabled', True))
                 elif self.path == '/signout':
                     controller.sign_out()
                 elif self.path == '/stop':
@@ -332,6 +359,7 @@ def main():
         atomic_write(controller.root / 'control.json', json.dumps({'port': server.server_port, 'token': token}))
         atomic_write(controller.root / 'control.pid', str(os.getpid()))
         threading.Thread(target=controller.audio_loop, daemon=True).start()
+        threading.Thread(target=controller.pager_loop, daemon=True).start()
         if (controller.root / 'storage.json').exists() and not (controller.root / 'signed-out').exists():
             controller.resume()
         print(f'Control panel: http://127.0.0.1:{server.server_port}', flush=True)

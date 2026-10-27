@@ -13,6 +13,7 @@ from .browser import Browser
 from .alerts import play_alert
 from .core import atomic_write, decide, evidence
 from .schedule import next_interval, validate_schedule
+from . import invites, pager
 
 
 def emit(root, result):
@@ -33,26 +34,53 @@ def check(config, root, browser):
     before = json.loads(baseline.read_text()) if baseline.exists() else None
     monitor_state(root, "capturing")
     after = browser.capture()
+    after["captured_at"] = datetime.now(timezone.utc).isoformat()
     visual = None
     if config.get("screenshots", {}).get("enabled") and not after.get("auth_signals"):
         from .visual import capture_visual
         visual = capture_visual(browser, root, config["screenshots"])
+    if visual:
+        after["visual"] = visual
     monitor_state(root, "analyzing")
     result = decide(before, after, config)
     if visual:
         result["visual"] = visual
+    if config.get("invites", {}).get("enabled"):
+        result["stage1"] = {key: result[key] for key in ['classification', 'confidence', 'reason'] if key in result}
+        if invites.candidate(before, after, config, result, visual):
+            monitor_state(root, "classifying_invite")
+            result["invite"] = invites.classify_invite(before, after, config, visual)
+            # Recall-first: ambiguous/model-failure results alert for review; do not silently lose them.
+            result["advance"] = True
+            if result["invite"]["classification"] in pager.NOTIFY:
+                event_id = invites.event_key(before, after, config, visual, root)
+                result["pager_event_id"] = pager.queue(root, event_id, result["invite"])
+        else:
+            result["invite"] = {"classification": "not_run", "confidence": None,
+                "reason": "No meaningful dashboard change to classify." if result['classification'] != 'auth_expired'
+                          else "Sign-in is required before checking for new invitations.", "program": "", "evidence": ""}
+            # Invisible script/token changes do not need to keep an obsolete raw baseline.
+            if before and result["classification"] == "uncertain":
+                result["advance"] = True
     if before and result["classification"] not in {"unchanged"}:
         event_id = str(time.time_ns())
         atomic_write(root / "changes" / (event_id + ".json"), json.dumps({
             "result": result, "evidence": evidence(before, after, config["llm"].get("max_input_chars", 24000))}, indent=2))
         result["artifact"] = str(root / "changes" / (event_id + ".json"))
-    if result["classification"] in {"baseline_created", "content_change", "unchanged"}:
+    if result["advance"] or result["classification"] in {"baseline_created", "content_change", "unchanged"}:
         browser.save()
     if result["advance"]:
         atomic_write(baseline, json.dumps(after))
     alert = play_alert(config, result, root)
     if alert:
         result["audio_alert"] = alert
+    if config.get("invites", {}).get("enabled"):
+        analysis_path = root / 'latest-analysis.json'
+        if (result.get('invite', {}).get('classification') != 'not_run'
+                or result['classification'] == 'auth_expired' or not analysis_path.exists()):
+            atomic_write(analysis_path, json.dumps({'time': datetime.now(timezone.utc).isoformat(),
+                'stage1': result['stage1'], 'stage2': result['invite'],
+                'pager_event_id': result.get('pager_event_id')}))
     emit(root, result)
     return result["classification"]
 

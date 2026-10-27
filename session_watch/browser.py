@@ -83,4 +83,5 @@ class Browser:
         if ready and not signals:
             self.page.locator(ready).first.wait_for(state="visible")
         return {"url": self.page.url, "status": status, "auth_signals": signals,
+                "authenticated_verified": bool(auth and not signals),
                 "html": normalized(self.page.content(), self.config)}

@@ -88,3 +88,9 @@ def test_minified_page_diff_keeps_changes_beyond_large_header():
     payload = evidence(before, after, 8000)
     assert "Two appointments" in payload["diff"]
     assert "One appointment" in payload["diff"]
+
+
+def test_verified_dashboard_prevents_soft_auth_guess_from_hiding_change(monkeypatch):
+    model(monkeypatch, {'classification':'auth_expired','confidence':.95,'reason':'Might be sign-in'})
+    result=classify(page(),page('New invitation',authenticated_verified=True),CONFIG)
+    assert result['classification']=='uncertain'
