@@ -65,6 +65,10 @@ In the local page, expand **PagerDuty setup**, paste that key, and choose **Enab
 
 For headless configuration, `[pager] enabled = true` can use the `PAGERDUTY_ROUTING_KEY` environment variable. No key is bundled with the project.
 
+## Compact interface
+
+The control page fits the viewport with Dashboard, Alerts, and Setup tabs. The screenshot scales to available space. Alerts can be filtered to **New** or **All**, with one alert per page and paginated explanations. **Setup** holds sign-in, sign-out, Stop App, and PagerDuty settings. Auth Needed alerts also offer sign-in directly: opening sign-in silences the sound, while successful verification resolves the alert and removes it from New.
+
 ## Sounds and status
 
 Confirmed dashboard changes create alerts even when the second check rules out a new invitation. The legacy `invite_only` setting no longer suppresses these alerts. Local sounds repeat every eight seconds until the relevant objects are dismissed:

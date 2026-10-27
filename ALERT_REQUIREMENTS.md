@@ -23,7 +23,7 @@ Session Watch watches the authenticated dashboard for newly arriving interview i
 2. Monitoring stops and an authentication pause is saved to disk. Further change alerts and PagerDuty delivery are suspended during this pause. Existing alert objects are retained.
 3. Repeated reports of the same unresolved authentication episode reuse the object; they do not create duplicates.
 4. Dismissing the object stops its sound and places it in history. It does not clear the pause, restart monitoring, or claim that authentication has been restored. The status light remains green because sign-in is still needed.
-5. Starting the sign-in action silences that authentication alert. A successful verified sign-in resolves it, records the resolution time, clears the pause, and resumes monitoring. Unrelated unread change alerts remain open.
+5. Starting the sign-in action silences that authentication alert while keeping it open in New. A successful verified sign-in resolves it, records the resolution time, clears the pause, and resumes monitoring. Unrelated unread change alerts remain open.
 6. A restart preserves the authentication pause even when its alert was dismissed. Another expiration after a successful sign-in creates a new episode and a new object.
 
 ## Change lifecycle
@@ -40,7 +40,7 @@ Session Watch watches the authenticated dashboard for newly arriving interview i
 
 Every object has a stable ID, category, creation time, most recent update time, revision, and status (`open`, `dismissed`, or `resolved`). It also stores the capture time when available, a human-readable reason, both model classifications and confidence values, returned explanations, supporting invitation evidence, and the associated PagerDuty event ID when applicable. Dismissal and authentication resolution have their own timestamps.
 
-The UI shows open objects in an Alerts section. Each card has a title, Central Time timestamp, explanation, model results when applicable, notification state, and its own Dismiss button. Dismissed and resolved items remain available under a history section. Model explanations are displayed as returned outputs; they are not claims to expose hidden model reasoning.
+The Alerts tab switches between New (open, undismissed items) and All (including dismissed and resolved history). Each card has a title, Central Time timestamp, explanation, model results when applicable, notification state, and its own Dismiss button. Auth Needed cards also carry the same Sign in / I’m signed in action used in Setup. Alerts are paginated one at a time; the Overview, Change check, and Invite check views have paginated text when needed. Model explanations are displayed as returned outputs; they are not claims to expose hidden model reasoning.
 
 Dismissal targets the exact object and revision shown to the user. If the object gained new information while the user was reading, the app asks them to review the updated item before dismissal. Dismissing one item cannot clear a different item that arrived meanwhile. Rendering model text uses text nodes, not executable HTML.
 
@@ -69,3 +69,14 @@ Objects are written to private local files independently of sound playback or an
 - Individual dismissal, update conflicts, history, and unread state survive reloads and restarts.
 - Confirmed invitation upgrades reopen an initially dismissed change; identical retries do not.
 - Object creation works with audio disabled, and later screenshots cannot clear it.
+
+
+## Responsive interface
+
+- The app occupies the current viewport using dynamic viewport height, with no scrolling of the main page.
+- Dashboard, Alerts, and Setup are separate tabs with keyboard navigation and touch controls.
+- Dashboard scales the entire latest screenshot to the available area; opening it full size is an explicit action.
+- Alerts offers New and All filters, previous/next item controls, and separate views for the overview and both LLM outputs. Long explanations use text pagination instead of overflowing the viewport.
+- Setup contains Session & app and PagerDuty subsections. Sign-in, sign-out, Stop App, and integration settings live there. Auth Needed alerts also offer the sign-in action directly.
+- The open-alert count and status light remain visible across tabs. A new screenshot does not change the selected tab or dismiss any alert.
+- Portrait phone and short landscape layouts use compact spacing; the screenshot and alert text use the remaining vertical space.

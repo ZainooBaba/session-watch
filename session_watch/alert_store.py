@@ -82,3 +82,12 @@ def resolve_auth(root):
                 item.update(status='resolved', resolved_at=now())
         atomic_write(root / 'alert-inbox.json', json.dumps(records))
         (root / 'auth-required.json').unlink(missing_ok=True)
+
+
+def silence_auth(root):
+    with FileLock(str(root / 'alert-inbox.lock'), timeout=5):
+        records = read(root)
+        for item in records:
+            if item['category'] == 'auth_needed' and item['status'] == 'open':
+                item['silenced_at'] = now()
+        atomic_write(root / 'alert-inbox.json', json.dumps(records))

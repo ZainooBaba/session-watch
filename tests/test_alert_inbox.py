@@ -125,3 +125,35 @@ def test_authenticated_dismiss_endpoint_only_changes_selected_object(tmp_path):
             assert [a['status'] for a in records] == ['open', 'dismissed']
     finally:
         server.shutdown(); server.server_close(); thread.join()
+
+
+def test_auth_action_keeps_item_new_until_verified_signin(tmp_path, monkeypatch):
+    config = tmp_path / 'config.toml'; config.write_text('')
+    controller = Controller(config)
+    controller.notify({'classification': 'auth_expired', 'reason': 'Login expired.'})
+    login = Mock(); login.poll.return_value = None; login.wait.return_value = 0
+    monkeypatch.setattr(controller, 'spawn', Mock(return_value=login))
+    controller.begin_login()
+    item = controller.status()['alerts'][0]
+    assert item['status'] == 'open' and item['silenced_at']
+    assert controller.status()['alert'] is None
+    assert controller.status()['session']['step'] == 'finish'
+    resume = Mock(); monkeypatch.setattr(controller, 'resume', resume)
+    controller.save_login()
+    item = controller.status()['alerts'][0]
+    assert item['status'] == 'resolved' and item['resolved_at']
+    assert not controller.status()['auth_paused']
+    resume.assert_called_once()
+
+
+def test_failed_signin_preserves_open_auth_alert(tmp_path, monkeypatch):
+    config = tmp_path / 'config.toml'; config.write_text('')
+    controller = Controller(config)
+    controller.notify({'classification': 'auth_expired', 'reason': 'Login expired.'})
+    login = Mock(); login.poll.return_value = None; login.wait.return_value = 1
+    monkeypatch.setattr(controller, 'spawn', Mock(return_value=login))
+    controller.begin_login()
+    with pytest.raises(ValueError, match='not confirmed'):
+        controller.save_login()
+    assert controller.status()['alerts'][0]['status'] == 'open'
+    assert controller.status()['auth_paused']

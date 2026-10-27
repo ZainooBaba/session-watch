@@ -50,12 +50,12 @@ class Controller:
         records = alert_store.read(self.root)
         opened = [a for a in records if a['status'] == 'open']
         if alert_store.paused(self.root):
-            opened = [a for a in opened if a['category'] == 'auth_needed']
+            opened = [a for a in opened if a['category'] == 'auth_needed' and not a.get('silenced_at')]
         item = opened[-1] if opened else None
         self.active = ({'id': item['id'], 'kind': 'login' if item['category'] == 'auth_needed' else 'change',
             'version': int(datetime.fromisoformat(item['updated_at']).timestamp() * 1000000),
             'since': item['created_at'], 'count': len(opened),
-            'invite_classification': item['stage2'].get('classification'),
+            'invite_classification': 'possible_invite' if item['category'] == 'review_needed' else item['stage2'].get('classification'),
             'review': {'time': item['created_at'], 'stage1': item['stage1'], 'stage2': item['stage2'],
                        'pager_event_id': item['pager_event_id']}} if item else None)
         return records
@@ -150,9 +150,9 @@ class Controller:
                 self.worker.send_signal(signal.SIGINT)
                 self.worker.wait(timeout=45)
             self.login = self.spawn('login', subprocess.PIPE)
-            for item in alert_store.read(self.root):
-                if item['category'] == 'auth_needed' and item['status'] == 'open':
-                    self.dismiss(item['id'], item['revision'])
+            alert_store.silence_auth(self.root)
+            self.sync_alerts()
+            self.wake.set()
             self.set_attention('login')
 
     def save_login(self):
