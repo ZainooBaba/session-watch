@@ -10,6 +10,7 @@ import tomllib
 
 from filelock import FileLock, Timeout
 from .browser import Browser
+from .alerts import play_alert
 from .core import atomic_write, decide, evidence
 from .schedule import next_interval, validate_schedule
 
@@ -42,6 +43,9 @@ def check(config, root, browser):
         browser.save()
     if result["advance"]:
         atomic_write(baseline, json.dumps(after))
+    alert = play_alert(config, result)
+    if alert:
+        result["audio_alert"] = alert
     emit(root, result)
     return result["classification"]
 

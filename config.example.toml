@@ -31,3 +31,8 @@ stddev_seconds = 15
 enabled = true
 pixel_threshold = 20
 minimum_changed_ratio = 0.001
+
+[alerts]
+enabled = true
+login_sound = "Basso"
+change_sound = "Glass"

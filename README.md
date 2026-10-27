@@ -129,3 +129,19 @@ timestamped before/after/diff images. The screenshot baseline advances after eve
 authenticated capture, independently of the HTML verdict, and is preserved on
 auth failure. No screenshot is taken of the login screen. Screenshots may contain
 private dashboard information; they stay local and are excluded from GitHub.
+
+## Sound alerts (macOS)
+
+`[alerts] enabled = true` plays **Basso three times** when human login/access review
+is required, and **Glass twice** for a confident HTML content change or a flagged
+screenshot change. An auth result takes priority over any visual verdict. Uncertain
+HTML alone, unchanged checks, and initial baselines stay silent. Screenshot changes
+use the configured pixel threshold and can include layout or dynamic visual noise;
+the sound does not mean a new invitation was semantically confirmed.
+
+The watcher records `audio_alert` in its event log, including playback failures.
+Sound failures do not stop monitoring. On auth expiry the login sound finishes
+before the watcher stops for human sign-in. Output uses the current system audio
+device and volume, with afplay volume set to 0.8; muted output cannot be overridden.
+Set `login_sound` and `change_sound` to built-in macOS sound names, or disable
+`alerts.enabled` to mute. Other operating systems log that audio is unsupported.
