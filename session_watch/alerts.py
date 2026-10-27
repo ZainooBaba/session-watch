@@ -35,16 +35,19 @@ def play_alert(config, result, root=None):
                     'error': 'Control service unavailable; persistent alert was not queued'}
     sound = settings.get('login_sound' if kind == 'login' else 'change_sound',
                          'Basso' if kind == 'login' else 'Glass')
+    volume = settings.get('volume', 1.0)
     repeats = 3 if kind == 'login' else 2
-    event = {'kind': kind, 'sound': sound, 'repeats': repeats, 'played': False}
+    event = {'kind': kind, 'sound': sound, 'repeats': repeats, 'volume': volume, 'played': False}
     if sys.platform != 'darwin':
         return {**event, 'error': 'Built-in sound playback currently supports macOS only'}
     if not isinstance(sound, str) or not sound.isalnum():
         return {**event, 'error': 'Use a built-in macOS sound name'}
+    if type(volume) not in (int, float) or not 0 <= volume <= 1:
+        return {**event, 'error': 'Alert volume must be between 0 and 1'}
     path = Path('/System/Library/Sounds') / (sound + '.aiff')
     try:
         for _ in range(repeats):
-            subprocess.run(['/usr/bin/afplay', '-v', '0.8', str(path)],
+            subprocess.run(['/usr/bin/afplay', '-v', str(volume), str(path)],
                            check=True, timeout=10, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as exc:

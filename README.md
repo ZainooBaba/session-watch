@@ -142,7 +142,7 @@ the sound does not mean a new invitation was semantically confirmed.
 The watcher records `audio_alert` in its event log, including playback failures.
 Sound failures do not stop monitoring. On auth expiry the login sound finishes
 before the watcher stops for human sign-in. Output uses the current system audio
-device and volume, with afplay volume set to 0.8; muted output cannot be overridden.
+device and volume, with afplay volume set to 1.0 (maximum); muted output cannot be overridden.
 Set `login_sound` and `change_sound` to built-in macOS sound names, or disable
 `alerts.enabled` to mute. Other operating systems log that audio is unsupported.
 
@@ -176,3 +176,5 @@ seconds and refreshes the image when a new capture is saved. Select the image to
 open it full size. A paused watcher keeps showing the last successful capture with
 its original timestamp. Screenshot responses are local only, are not cached, and
 block embedding from other origins.
+
+Set `alerts.volume` between 0 and 1. The current default is 1.0, maximum alert playback level. Actual loudness still follows the current Mac output volume and mute setting.

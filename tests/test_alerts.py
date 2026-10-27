@@ -29,6 +29,7 @@ def test_distinct_sounds(monkeypatch,label,sound,repeats):
     result=play_alert({'alerts':{'enabled':True}},{'classification':label})
     assert result['played'] and player.call_count==repeats
     assert player.call_args.args[0][-1].endswith(sound+'.aiff')
+    assert player.call_args.args[0][2] == '1.0'
 
 
 def test_failed_audio_is_nonfatal(monkeypatch):

@@ -34,6 +34,7 @@ minimum_changed_ratio = 0.001
 
 [alerts]
 enabled = true
+volume = 1.0
 persistent = true
 repeat_seconds = 8
 login_sound = "Basso"
