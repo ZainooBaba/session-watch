@@ -18,7 +18,7 @@ from filelock import FileLock
 from .alerts import alert_kind, play_alert
 from .core import atomic_write
 from .panel import PAGE
-from . import pager
+from . import pager, alert_store
 
 
 class Controller:
@@ -38,30 +38,45 @@ class Controller:
         self.attention = json.loads(attention_file.read_text()) if attention_file.exists() else None
         saved = self.root / 'active-alert.json'
         self.active = json.loads(saved.read_text()) if saved.exists() else None
-        if self.active:
-            self.sequence = self.active['version']
+        if self.active and not (self.root / 'alert-inbox.json').exists():
+            legacy = self.active
+            alert_store.record(self.root, {'classification': 'auth_expired' if legacy['kind'] == 'login' else 'content_change',
+                'reason': 'Unresolved alert carried over from the previous app version.',
+                'stage1': (legacy.get('review') or {}).get('stage1', {}),
+                'invite': (legacy.get('review') or {}).get('stage2', {})})
+        self.sync_alerts()
+
+    def sync_alerts(self):
+        records = alert_store.read(self.root)
+        opened = [a for a in records if a['status'] == 'open']
+        if alert_store.paused(self.root):
+            opened = [a for a in opened if a['category'] == 'auth_needed']
+        item = opened[-1] if opened else None
+        self.active = ({'id': item['id'], 'kind': 'login' if item['category'] == 'auth_needed' else 'change',
+            'version': int(datetime.fromisoformat(item['updated_at']).timestamp() * 1000000),
+            'since': item['created_at'], 'count': len(opened),
+            'invite_classification': item['stage2'].get('classification'),
+            'review': {'time': item['created_at'], 'stage1': item['stage1'], 'stage2': item['stage2'],
+                       'pager_event_id': item['pager_event_id']}} if item else None)
+        return records
 
     def persist(self):
         atomic_write(self.root / 'active-alert.json', json.dumps(self.active))
         atomic_write(self.root / 'attention.json', json.dumps(self.attention))
 
     def notify(self, result):
-        kind = alert_kind(result, self.config.get("alerts", {}).get("invite_only", False))
-        if kind is None:
-            return
         with self.lock:
-            self.sequence += 1
-            if ((self.active and self.active['kind'] == 'login')
-                    or (self.attention and self.attention['kind'] == 'login')):
-                kind = 'login'
-            self.active = {'kind': kind, 'version': self.sequence,
-                           'since': self.active['since'] if self.active else datetime.now(timezone.utc).isoformat(),
-                           'count': self.active['count'] + 1 if self.active else 1,
-                           'invite_classification': result.get('invite', {}).get('classification'),
-                           'review': ({'time': datetime.now(timezone.utc).isoformat(), 'stage1': result.get('stage1', {}),
-                                       'stage2': result['invite'], 'pager_event_id': result.get('pager_event_id')}
-                                      if result.get('invite') else None)}
-            self.attention = {'kind': kind, 'invite_classification': result.get('invite', {}).get('classification')}
+            # Watcher has already persisted this event before advancing its baseline.
+            if not result.get('alert_id') or not any(a['id'] == result['alert_id'] for a in alert_store.read(self.root)):
+                alert_store.record(self.root, result)
+            self.sync_alerts()
+            self.persist()
+        self.wake.set()
+
+    def dismiss(self, event_id, revision):
+        with self.lock:
+            alert_store.dismiss(self.root, event_id, revision)
+            self.sync_alerts()
             self.persist()
         self.wake.set()
 
@@ -72,9 +87,13 @@ class Controller:
 
     def acknowledge(self, version=None):
         with self.lock:
+            self.sync_alerts()
             if self.active and version is not None and version != self.active['version']:
                 raise ValueError('A newer alert arrived. Review the panel and acknowledge again.')
-            self.active = None
+            for item in alert_store.read(self.root):
+                if item['status'] == 'open':
+                    alert_store.dismiss(self.root, item['id'], item['revision'])
+            self.sync_alerts()
             self.attention = None
             self.persist()
         self.wake.set()
@@ -83,17 +102,18 @@ class Controller:
         while not self.closed.is_set():
             self.wake.clear()
             with self.lock:
+                self.sync_alerts()
                 active = dict(self.active) if self.active else None
             if active:
                 result = {'classification': 'auth_expired' if active['kind'] == 'login' else 'content_change',
                           'invite': {'classification': active.get('invite_classification') or 'possible_invite'}}
-                settings = {**self.config, 'alerts': {**self.config.get('alerts', {}), 'persistent': False}}
+                settings = {**self.config, 'alerts': {**self.config.get('alerts', {}), 'persistent': False, 'invite_only': False}}
                 played = play_alert(settings, result)
                 with self.lock:
                     self.message = '' if played and played.get('played') else 'Sound could not play; check system audio.'
                 self.wake.wait(self.config.get('alerts', {}).get('repeat_seconds', 8))
             else:
-                self.wake.wait()
+                self.wake.wait(2)
 
     def pager_loop(self):
         while not self.closed.is_set():
@@ -111,6 +131,8 @@ class Controller:
 
     def resume(self):
         with self.actions:
+            if alert_store.paused(self.root):
+                raise ValueError('Sign in to restore monitoring. Dismissing the alert does not restore authentication.')
             if not (self.root / 'storage.json').exists():
                 raise ValueError('Sign in before starting monitoring.')
             if self.login and self.login.poll() is None:
@@ -128,7 +150,9 @@ class Controller:
                 self.worker.send_signal(signal.SIGINT)
                 self.worker.wait(timeout=45)
             self.login = self.spawn('login', subprocess.PIPE)
-            self.acknowledge()
+            for item in alert_store.read(self.root):
+                if item['category'] == 'auth_needed' and item['status'] == 'open':
+                    self.dismiss(item['id'], item['revision'])
             self.set_attention('login')
 
     def save_login(self):
@@ -146,7 +170,11 @@ class Controller:
                              'screenshots/previous.png', 'screenshots/latest-diff.png']:
                     (self.root / name).unlink(missing_ok=True)
                 (self.root / 'signed-out').unlink()
-            self.acknowledge()
+            alert_store.resolve_auth(self.root)
+            self.attention = None
+            self.sync_alerts()
+            self.persist()
+            self.wake.set()
         self.resume()
 
     def stop_processes(self):
@@ -173,6 +201,7 @@ class Controller:
                 (self.root / name).unlink(missing_ok=True)
             atomic_write(self.root / 'signed-out', datetime.now(timezone.utc).isoformat())
             self.acknowledge()
+            alert_store.resolve_auth(self.root)
             self.message = ''
 
     def stop_app(self):
@@ -180,12 +209,13 @@ class Controller:
         self.wake.set()
         with self.actions:
             self.stop_processes()
-            self.acknowledge()
+            # Stopping is not a dismissal: preserve unread alerts for the next launch.
+            self.persist()
 
     def session_info(self):
         login_open = bool(self.login and self.login.poll() is None)
         monitoring = bool(self.worker and self.worker.poll() is None)
-        needs_login = ((self.active and self.active['kind'] == 'login')
+        needs_login = (alert_store.paused(self.root) or (self.active and self.active['kind'] == 'login')
                        or (self.attention and self.attention['kind'] == 'login'))
         if login_open:
             return {'step': 'finish', 'label': "I'm signed in",
@@ -233,12 +263,22 @@ class Controller:
         except (OSError, ValueError):
             pass
         with self.lock:
+            inbox = self.sync_alerts()
+            deliveries = {}
+            for path in (self.root / 'pager-outbox').glob('*.json'):
+                try:
+                    entry = json.loads(path.read_text())
+                    deliveries[entry['id']] = {k: entry.get(k) for k in ['status', 'error', 'accepted_at']}
+                except (OSError, ValueError, KeyError):
+                    continue
+            for item in inbox:
+                item['pager_delivery'] = deliveries.get(item.get('pager_event_id'))
             if self.active and self.active.get('review'):
                 analysis = self.active['review']
             pager_info = pager.status(self.root, self.config, (analysis or {}).get('pager_event_id'))
             monitoring = bool(self.worker and self.worker.poll() is None)
             login_open = bool(self.login and self.login.poll() is None)
-            needs_login = login_open or (self.active and self.active['kind'] == 'login') or (self.attention and self.attention['kind'] == 'login')
+            needs_login = alert_store.paused(self.root) or login_open or (self.active and self.active['kind'] == 'login') or (self.attention and self.attention['kind'] == 'login')
             changed = (self.active and self.active['kind'] == 'change') or (self.attention and self.attention['kind'] == 'change')
             if needs_login:
                 indicator = {'state': 'action', 'label': 'Sign-in needed'}
@@ -252,7 +292,7 @@ class Controller:
                 indicator = {'state': 'active', 'label': 'Monitoring'}
             else:
                 indicator = {'state': 'idle', 'label': 'Signed out' if (self.root / 'signed-out').exists() else 'Paused'}
-            return {'alert': self.active, 'message': self.message, 'screenshot': latest,
+            return {'alerts': [] if (self.root / 'signed-out').exists() else list(reversed(inbox)), 'auth_paused': alert_store.paused(self.root), 'alert': self.active, 'message': self.message, 'screenshot': latest,
                     'attention': self.attention, 'indicator': indicator,
                     'session': self.session_info(), 'analysis': analysis, 'pager': pager_info, 'signed_out': (self.root / 'signed-out').exists(),
                     'timing': timing, 'server_time': time.time(),
@@ -317,6 +357,8 @@ def handler_for(controller, token):
                     raise ValueError('Expected a JSON object')
                 if self.path == '/event':
                     controller.notify(data)
+                elif self.path == '/dismiss':
+                    controller.dismiss(data.get('id'), data.get('revision'))
                 elif self.path == '/acknowledge':
                     controller.acknowledge(data.get('version'))
                 elif self.path == '/pager-config':
@@ -360,7 +402,7 @@ def main():
         atomic_write(controller.root / 'control.pid', str(os.getpid()))
         threading.Thread(target=controller.audio_loop, daemon=True).start()
         threading.Thread(target=controller.pager_loop, daemon=True).start()
-        if (controller.root / 'storage.json').exists() and not (controller.root / 'signed-out').exists():
+        if (controller.root / 'storage.json').exists() and not (controller.root / 'signed-out').exists() and not alert_store.paused(controller.root):
             controller.resume()
         print(f'Control panel: http://127.0.0.1:{server.server_port}', flush=True)
         try:

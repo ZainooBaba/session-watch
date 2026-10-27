@@ -34,7 +34,6 @@ minimum_changed_ratio = 0.001
 
 [alerts]
 enabled = true
-invite_only = true
 volume = 1.0
 persistent = true
 repeat_seconds = 8
@@ -44,7 +43,7 @@ change_sound = "Glass"
 [invites]
 enabled = true
 # Omit selector to use all page text; this is suitable for Thalamus dashboards.
-selector = "thal-dashboard"
+# selector = "thal-dashboard-redesign"
 max_input_chars = 16000
 minimum_no_invite_confidence = 0.95
 

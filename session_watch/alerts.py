@@ -9,6 +9,8 @@ def alert_kind(result, invite_only=False):
         return 'login'
     if result.get('invite', {}).get('classification') in {'interview_invite', 'possible_invite'}:
         return 'change'
+    if result.get('classification') == 'content_change':
+        return 'change'
     if invite_only:
         return None
     if (result.get('classification') == 'content_change'

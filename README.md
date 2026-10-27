@@ -1,17 +1,19 @@
 # Session Watch
 
-A local interview-invitation monitor for an authenticated dashboard such as Thalamus. A human signs in once; the app saves the session, refreshes the dashboard, compares HTML and screenshots, and runs two local LLM checks. New **and possible** interview invitations trigger a repeating local sound. **Only confirmed new interview invitations trigger PagerDuty.**
+A local interview-invitation monitor for an authenticated dashboard such as Thalamus. A human signs in once; the app saves the session, refreshes the dashboard, compares HTML and screenshots, and runs two local LLM checks. Authentication failures, LLM-confirmed dashboard changes, and possible invitations create persistent local alert objects. **Only new interview invitations that pass both LLM checks trigger PagerDuty.**
 
 The policy favors recall: an ambiguous meaningful change or a failed invitation classifier alerts for review instead of silently risking a missed invitation. Existing invitations present in the initial baseline are not treated as new.
+
+The detailed behavior and acceptance criteria are in [Alert requirements](ALERT_REQUIREMENTS.md).
 
 ## How the two checks work
 
 1. Playwright reloads the dashboard with saved authentication. Identical HTML and screenshots require no LLM call.
 2. **Change check:** a local Ollama model distinguishes dashboard changes, expired authentication, and uncertainty. Configured login URLs/elements, HTTP 401/403, and a missing authenticated selector take priority. A model's unsupported login guess cannot override a verified authenticated dashboard.
 3. **Invitation check:** a separate structured LLM call compares the old and new dashboard text and focused diff. It returns `interview_invite`, `possible_invite`, or `not_interview_invite`, with confidence, explanation, and a quote when available. Both passes can use the same local model; `[invites.llm]` optionally overrides settings for pass two.
-4. Meaningful text or screenshot changes still reach pass two when pass one is uncertain. Only a sufficiently confident non-invitation result suppresses an invitation alert. An increasing total/pending invitation counter or an unexplained screenshot-only change is kept as a possible invitation even if the text model tries to rule it out.
-5. Confirmed new invitations require a verifiable new text quote. An unverifiable claim is downgraded to **possible**, which still alerts locally but never pages. Failed/invalid/offline pass-two responses also become possible local alerts. Routine invisible script/token changes do not page you.
-6. The control page displays both decisions, reasons, and quoted evidence. An active alert's review stays pinned while later screenshots arrive. All decisions are local; this does not reveal hidden model reasoning.
+4. Meaningful text or screenshot changes still reach pass two when pass one is uncertain. A confident non-invitation result keeps the confirmed-change alert local; it does not erase or dismiss it. An increasing total/pending invitation counter or an unexplained screenshot-only change is kept as a possible invitation even if the text model tries to rule it out.
+5. PagerDuty requires pass one to return `content_change` and pass two to return `interview_invite`. Confirmed new invitations require a verifiable new text quote. An unverifiable claim is downgraded to **possible**, which still alerts locally but never pages. Failed/invalid/offline pass-two responses also become possible local alerts. Routine invisible script/token changes do not page you.
+6. The control page displays both decisions, reasons, and quoted evidence. An active alert's review stays pinned while later screenshots arrive. Alert cards retain both model classifications, confidence, returned explanations, and evidence. These are the model’s returned explanations, not hidden internal reasoning.
 
 The text-only model cannot interpret image pixels. Screenshot-only differences can therefore produce possible-invite false positives, including layout/font noise. This is intentional under the recall-first policy. Classification is probabilistic and does not guarantee every invitation will be detected.
 
@@ -57,7 +59,7 @@ In the local page, expand **PagerDuty setup**, paste that key, and choose **Enab
 - Only confirmed new interview invites create critical trigger events. Possible invites, model uncertainty/failures, sign-in requests, screenshot-only ambiguity, and unrelated changes never trigger PagerDuty. PagerDuty handles recipients, escalation, phone/push/SMS behavior, and acknowledgments according to your service settings.
 - Payloads contain a generic invitation/review message, event identifier, classification, and confidence. No dashboard HTML, screenshots, program names, or private interview details are sent.
 - Alerts are stored in a durable outbox before the content baseline advances. If PagerDuty is unconfigured or unavailable, they remain queued rather than being discarded.
-- The supervisor retries unconfirmed deliveries independently of the watcher, including when it is paused for login. Signing out pauses delivery until signing in again; stopping the app stops the sender.
+- The supervisor retries unconfirmed deliveries independently of the watcher, except while authentication is required. Signing out also pauses delivery until signing in again; stopping the app stops the sender.
 - A stable event key is reused for retries via PagerDuty's `dedup_key`. Known accepted events are not resent. The page reports **accepted by PagerDuty**, which is not proof a phone notification was delivered. PagerDuty deduplication applies to the corresponding open alert.
 - The supervisor checks pending delivery every 15 seconds, with increasing retry backoff after failures. The endpoint is `https://events.pagerduty.com/v2/enqueue`.
 
@@ -65,21 +67,21 @@ For headless configuration, `[pager] enabled = true` can use the `PAGERDUTY_ROUT
 
 ## Sounds and status
 
-With `[alerts] invite_only = true`, generic non-invitation changes stay informational. Local sounds repeat every eight seconds until acknowledged:
+Confirmed dashboard changes create alerts even when the second check rules out a new invitation. The legacy `invite_only` setting no longer suppresses these alerts. Local sounds repeat every eight seconds until the relevant objects are dismissed:
 
 - **Basso three times:** human sign-in/access review required.
-- **Glass twice:** confirmed or possible interview invitation (local sound; PagerDuty is confirmed-only).
+- **Glass twice:** confirmed dashboard change, possible invitation, or confirmed new invitation. PagerDuty requires both checks to pass.
 
 On macOS, `alerts.volume = 1.0` uses maximum afplay playback level, subject to your system output volume and mute setting. Sound failures are logged and do not stop monitoring. If the supervisor is unavailable, the watcher falls back to one sound sequence and reports that persistent playback could not be established. Audio currently supports macOS only.
 
-**Silence & acknowledge** stops the current local alert; a new event can start another. A current tone may finish. Acknowledge PagerDuty incidents in PagerDuty separately. The status dot is:
+Each alert card has a **Dismiss** button that silences that object and preserves it in history. Other open alerts remain active. A current tone may finish. Acknowledge PagerDuty incidents in PagerDuty separately. The status dot is:
 
 - Pulsing yellow while active.
-- Red for a new/possible invitation alert.
+- Red for an open dashboard-change, review, or invitation alert.
 - Green for sign-in or another required action.
 - Gray while idle or disconnected.
 
-Unresolved login takes priority. Alert/attention state survives new screenshots, unchanged checks, page reloads, and service restarts until acknowledged or resolved. A known red/green state is retained during a temporary page connection loss. Reduced-motion preferences disable the pulse.
+Unresolved login takes priority. Alert/attention state survives new screenshots, unchanged checks, page reloads, and service restarts until individually dismissed or resolved. Dismissing an auth alert silences it but does not restore the session. A known red/green state is retained during a temporary page connection loss. Reduced-motion preferences disable the pulse.
 
 ## Captures and refresh timing
 
@@ -99,7 +101,7 @@ Login and background monitoring use the installed Chromium version's normal brow
 
 The footer offers two controls with explanations before confirmation:
 
-- **Sign out:** stops the watcher and login browser, silences local alerts, removes saved authentication from this Mac, and hides the dashboard screenshot/review. Existing history stays local. This clears Session Watch's login, not other Thalamus sessions or remote tokens. Next successful sign-in starts a fresh content/screenshot baseline.
+- **Sign out:** stops the watcher and login browser, dismisses local alerts, removes saved authentication from this Mac, and hides the dashboard screenshot/review. Existing history stays local. This clears Session Watch's login, not other Thalamus sessions or remote tokens. Next successful sign-in starts a fresh content/screenshot baseline.
 - **Stop app:** stops the watcher, login browser, audio, PagerDuty sender, and control service while retaining saved login and queued events. It does not stop a shared Ollama server. Start the supervisor again, or ask the assistant, to resume.
 
 ## Local state and privacy
@@ -110,6 +112,8 @@ The footer offers two controls with explanations before confirmation:
 - `baseline.json`: raw rendered baseline HTML.
 - `events.jsonl`: timestamped monitor decisions and local alert results.
 - `changes/`: redacted old/new excerpts, focused diffs, and verdicts.
+- `alert-inbox.json`: private alert objects, model explanations, review history, and dismissal timestamps.
+- `auth-required.json`: persistent sign-in pause; dismissing an alert does not clear it.
 - `screenshots/`: latest/previous/diff PNGs and timestamped visual changes.
 - `latest-analysis.json`, `active-alert.json`, `attention.json`: review and latched alert state.
 - `pager-settings.json`: private routing key and enable setting.

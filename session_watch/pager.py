@@ -61,7 +61,7 @@ def status(root, config, event_id=None):
 
 
 def dispatch(root, config):
-    if (root / 'signed-out').exists():
+    if (root / 'signed-out').exists() or (root / 'auth-required.json').exists():
         return
     current = settings(root, config)
     if not current.get('enabled') or not current.get('routing_key'):

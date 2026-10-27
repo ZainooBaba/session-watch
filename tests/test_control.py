@@ -30,6 +30,11 @@ def test_alert_persists_until_acknowledged_and_login_has_priority(controller):
     assert controller.active is None
     assert Controller(controller.path).active is None
     controller.notify({'classification': 'content_change'})
+    assert controller.active is None
+    assert controller.status()['auth_paused']
+    from session_watch.alert_store import resolve_auth
+    resolve_auth(controller.root)
+    controller.notify({'classification': 'content_change'})
     assert controller.active['kind'] == 'change'
 
 
@@ -225,7 +230,8 @@ def test_stop_app_stops_processes_and_retains_saved_login(controller):
     controller.notify({'classification': 'content_change'})
     controller.stop_app()
     assert controller.closed.is_set() and controller.wake.is_set()
-    assert controller.worker is None and controller.active is None
+    assert controller.worker is None and controller.active is not None
+    assert Controller(controller.path).status()['alerts'][0]['status'] == 'open'
     worker.send_signal.assert_called_once()
     assert (controller.root / 'storage.json').exists()
 

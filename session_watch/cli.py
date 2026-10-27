@@ -13,7 +13,7 @@ from .browser import Browser
 from .alerts import play_alert
 from .core import atomic_write, decide, evidence
 from .schedule import next_interval, validate_schedule
-from . import invites, pager
+from . import invites, pager, alert_store
 
 
 def emit(root, result):
@@ -45,16 +45,26 @@ def check(config, root, browser):
     result = decide(before, after, config)
     if visual:
         result["visual"] = visual
+    result["captured_at"] = after["captured_at"]
+    result["alert_id"] = invites.event_key(before, after, config, visual, root) if before else None
+    result["stage1"] = {key: result[key] for key in ["classification", "confidence", "reason"] if key in result}
+    if result["classification"] == "auth_expired":
+        result["reason"] = result.get("reason") or "; ".join(after.get("auth_signals", [])) or "Sign-in required."
+        result["stage1"]["reason"] = result["reason"]
     if config.get("invites", {}).get("enabled"):
-        result["stage1"] = {key: result[key] for key in ['classification', 'confidence', 'reason'] if key in result}
         if invites.candidate(before, after, config, result, visual):
+            result["checking_invite"] = True
+            alert_store.record(root, result)
             monitor_state(root, "classifying_invite")
             result["invite"] = invites.classify_invite(before, after, config, visual)
             # Recall-first: ambiguous/model-failure results alert for review; do not silently lose them.
             result["advance"] = True
-            if result["invite"]["classification"] in pager.NOTIFY:
+            result["checking_invite"] = False
+            if result["classification"] == "content_change" and result["invite"]["classification"] in pager.NOTIFY and not alert_store.paused(root):
                 event_id = invites.event_key(before, after, config, visual, root)
-                result["pager_event_id"] = pager.queue(root, event_id, result["invite"])
+                result["pager_event_id"] = event_id
+                alert_store.record(root, result)
+                pager.queue(root, event_id, result["invite"])
         else:
             result["invite"] = {"classification": "not_run", "confidence": None,
                 "reason": "No meaningful dashboard change to classify." if result['classification'] != 'auth_expired'
@@ -62,6 +72,7 @@ def check(config, root, browser):
             # Invisible script/token changes do not need to keep an obsolete raw baseline.
             if before and result["classification"] == "uncertain":
                 result["advance"] = True
+    alert_store.record(root, result)
     if before and result["classification"] not in {"unchanged"}:
         event_id = str(time.time_ns())
         atomic_write(root / "changes" / (event_id + ".json"), json.dumps({
@@ -106,10 +117,13 @@ def run(args):
                 if snapshot["auth_signals"]:
                     raise RuntimeError("Login not confirmed: " + "; ".join(snapshot["auth_signals"]))
                 browser.save()
+                alert_store.resolve_auth(root)
                 emit(root, {"classification": "session_saved", "reason": "Existing baseline preserved"})
             return 0
         if not (root / "storage.json").exists():
             raise RuntimeError("Run session-watch login first")
+        if alert_store.paused(root):
+            return 2
         with Browser(config, root, headed=args.headed) as browser:
             while True:
                 last_error = None
