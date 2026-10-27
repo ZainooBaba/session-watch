@@ -1,0 +1,21 @@
+url = "https://example.com/account"
+interval_seconds = 60
+settle_ms = 1500
+navigation_timeout_ms = 30000
+# Set a stable selector that appears on the fully rendered monitored page.
+# ready_selector = "main"
+# Strongly recommended: element visible ONLY while authenticated.
+# authenticated_selector = "[data-testid='account-menu']"
+# login_selector = "form[action='/login']"
+login_url_patterns = ["/login", "/signin", "/sign-in", "/session-expired"]
+# Optional: suppress known dynamic markup. Defaults compare all serialized HTML.
+ignore_selectors = []
+ignore_attributes = []
+state_dir = ".session-watch"
+
+[llm]
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:8b"
+timeout_seconds = 120
+max_input_chars = 24000
+minimum_confidence = 0.8
