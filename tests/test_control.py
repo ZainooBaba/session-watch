@@ -91,3 +91,40 @@ def test_login_action_stops_watch_and_save_resumes(controller, monkeypatch):
     controller.save_login()
     login.stdin.write.assert_called_once_with(b'\n')
     resume.assert_called_once()
+
+
+def test_latest_screenshot_metadata_timestamp_and_http_image(controller):
+    from PIL import Image
+    from datetime import datetime, timezone
+    import os
+    assert controller.status()['screenshot'] is None
+    folder = controller.root / 'screenshots'
+    folder.mkdir()
+    image = folder / 'latest.png'
+    Image.new('RGB', (25, 25), 'white').save(image)
+    timestamp = 1793113200
+    os.utime(image, (timestamp, timestamp))
+    info = controller.status()['screenshot']
+    assert datetime.fromisoformat(info['captured_at']) == datetime.fromtimestamp(timestamp, timezone.utc)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(controller, 'secret'))
+    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        with httpx.Client(trust_env=False) as client:
+            page = client.get(url).text
+            assert 'Latest dashboard screenshot' in page
+            assert "timeZone:'America/Chicago'" in page
+            response = client.get(url + info['url'])
+            assert response.status_code == 200
+            assert response.headers['content-type'] == 'image/png'
+            assert response.headers['cache-control'] == 'no-store'
+            assert response.headers['cross-origin-resource-policy'] == 'same-origin'
+            assert response.content == image.read_bytes()
+            assert client.get(url + info['url'], headers={'Host': 'evil.example'}).status_code == 403
+            previous = info['version']
+            os.utime(image, (timestamp + 90, timestamp + 90))
+            assert controller.status()['screenshot']['version'] != previous
+            image.unlink()
+            assert client.get(url + info['url']).status_code == 404
+    finally:
+        server.shutdown(); server.server_close(); thread.join()

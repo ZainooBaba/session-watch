@@ -169,3 +169,10 @@ after acknowledgment. If the control service is unavailable, the watcher falls
 back to one sound sequence and logs the failure to establish persistent playback.
 Running the supervisor and a standalone watcher against the same state directory
 at the same time is prevented by the monitor lock.
+
+The control page displays the most recent authenticated dashboard screenshot with
+its capture time in America/Chicago (Central). It checks for updates every two
+seconds and refreshes the image when a new capture is saved. Select the image to
+open it full size. A paused watcher keeps showing the last successful capture with
+its original timestamp. Screenshot responses are local only, are not cached, and
+block embedding from other origins.
