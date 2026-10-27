@@ -84,10 +84,12 @@ def run(args):
             raise RuntimeError("Run session-watch login first")
         with Browser(config, root, headed=args.headed) as browser:
             while True:
+                last_error = None
                 try:
                     outcome = check(config, root, browser)
                 except Exception as exc:
-                    emit(root, {"classification": "error", "reason": type(exc).__name__ + ": capture/check failed; baseline retained"})
+                    last_error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__ + ": capture/check failed; baseline retained"
+                    emit(root, {"classification": "error", "reason": last_error})
                     if args.command == "check":
                         return 1
                 else:
@@ -98,7 +100,7 @@ def run(args):
                     if args.command == "check":
                         return 3 if outcome == "uncertain" else 0
                 delay = next_interval(config)
-                monitor_state(root, "waiting", interval_seconds=delay, next_capture_at=time.time() + delay)
+                monitor_state(root, "waiting", interval_seconds=delay, next_capture_at=time.time() + delay, last_error=last_error)
                 time.sleep(delay)
 
 

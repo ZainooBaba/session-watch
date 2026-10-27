@@ -40,7 +40,7 @@ function paintCountdown(){
    const remaining=Math.max(0,timing.next_capture_at*1000-(Date.now()+serverOffset));
    fraction=Math.min(1,remaining/(timing.interval_seconds*1000));
    const seconds=Math.ceil(remaining/1000);
-   text=seconds>0?'Next screenshot in '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):'Starting next capture…';
+   text=seconds>0?(timing.last_error?'Retrying capture in ':'Next screenshot in ')+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):'Starting next capture…';
   }else if(timing?.phase==='analyzing'){text='Comparing latest capture…'}
   else{text='Capturing dashboard…'}
  }
@@ -51,11 +51,11 @@ async function refresh(){
  if(!response.ok)throw Error('Status unavailable');
  const s=await response.json();monitor=s;receivedAt=Date.now();serverOffset=s.server_time*1000-(start+receivedAt)/2;
  version=s.alert?.version??null;
- $('status').textContent=s.login_open?'Sign-in needed':s.monitoring?'Monitoring':'Paused';
+ $('status').textContent=s.login_open?'Sign-in needed':s.monitoring?(s.timing?.last_error?'Retrying':'Monitoring'):'Paused';
  $('status-badge').classList.toggle('paused',!s.monitoring);
  $('alert').textContent=s.alert?(s.alert.kind==='login'?'Your session needs attention':'A dashboard change was detected'):s.login_open?'Finish sign-in to continue':s.monitoring?'All quiet. We’re keeping watch.':'Monitoring is paused';
  $('alert-detail').textContent=s.alert?'Your alert will repeat until acknowledged.':'You’ll hear a distinct sound when something needs you.';
- $('message').textContent=s.message||'';
+ $('message').textContent=s.message||s.timing?.last_error||'';
  if(s.screenshot){
   const shot=s.screenshot,image=$('latest-screenshot');
   $('capture-status').textContent='Last captured';$('capture-time').dateTime=shot.captured_at;$('capture-time').textContent=centralTime(shot.captured_at);
