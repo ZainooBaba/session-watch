@@ -25,7 +25,7 @@ class Browser:
         try:
             self.browser = self.playwright.chromium.launch(headless=not self.headed)
             state = self.root / "storage.json"
-            self.context = self.browser.new_context(storage_state=str(state) if state.exists() else None)
+            self.context = self.browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=1, storage_state=str(state) if state.exists() else None)
             session = self.root / "session.json"
             if session.exists():
                 self.context.add_init_script("(" + RESTORE_SESSION + ")(" + session.read_text() + ")")
@@ -39,6 +39,9 @@ class Browser:
     def __exit__(self, *args):
         self.browser.close()
         self.playwright.stop()
+
+    def screenshot(self):
+        return self.page.screenshot(full_page=True, animations="disabled", caret="hide")
 
     def save(self):
         atomic_write(self.root / "storage.json", json.dumps(self.context.storage_state(indexed_db=True)))

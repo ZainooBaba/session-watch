@@ -112,3 +112,20 @@ gh repo create session-watch --private --source=. --remote=origin --push
 ```
 
 Use a private repository by default. No website URL or credentials are bundled.
+
+## Screenshot comparison
+
+With `[screenshots] enabled = true`, each successfully authenticated capture also
+saves a full-page screenshot at a fixed 1280 × 900 viewport. Local pixel comparison
+uses a per-channel tolerance of 20 and flags a visual change when at least 0.1%
+of pixels differ or dimensions change. Animations and the text caret are hidden
+for capture. This is a visual difference detector; it does not judge the meaning
+of a screenshot or send images to the text-only Mistral/Ollama classifier.
+
+The `visual` field in each event reports the result and changed percentage.
+`.session-watch/screenshots/` contains `previous.png`, `latest.png`, and
+`latest-diff.png` (changed pixels highlighted in pink). Flagged changes also keep
+timestamped before/after/diff images. The screenshot baseline advances after every
+authenticated capture, independently of the HTML verdict, and is preserved on
+auth failure. No screenshot is taken of the login screen. Screenshots may contain
+private dashboard information; they stay local and are excluded from GitHub.

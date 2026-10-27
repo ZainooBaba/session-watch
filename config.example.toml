@@ -26,3 +26,8 @@ min_seconds = 60
 max_seconds = 120
 mean_seconds = 90
 stddev_seconds = 15
+
+[screenshots]
+enabled = true
+pixel_threshold = 20
+minimum_changed_ratio = 0.001

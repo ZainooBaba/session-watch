@@ -48,7 +48,7 @@ def test_saved_login_content_change_and_expiry(website, tmp_path, monkeypatch):
     origin, handler = website
     config = {"url": origin + "/account", "settle_ms": 0, "navigation_timeout_ms": 500,
               "authenticated_selector": "#account", "login_url_patterns": ["/login"],
-              "llm": {"model": "test"}}
+              "llm": {"model": "test"}, "screenshots": {"enabled": True}}
     response = Mock()
     response.json.return_value = {"message": {"content": json.dumps({
         "classification": "content_change", "confidence": 1, "reason": "Version updated"})}}
@@ -61,14 +61,18 @@ def test_saved_login_content_change_and_expiry(website, tmp_path, monkeypatch):
         browser.save()
     with Browser(config, tmp_path) as browser:
         assert check(config, tmp_path, browser) == "baseline_created"
+        assert (tmp_path / "screenshots" / "baseline.png").exists()
         assert browser.page.evaluate("sessionStorage.getItem('example')") == "persisted"
         assert check(config, tmp_path, browser) == "unchanged"
         handler.content = "Version two"
         assert check(config, tmp_path, browser) == "content_change"
         baseline = (tmp_path / "baseline.json").read_text()
+        assert (tmp_path / "screenshots" / "latest-diff.png").exists()
+        visual_baseline = (tmp_path / "screenshots" / "baseline.png").read_bytes()
         handler.expired = True
         assert check(config, tmp_path, browser) == "auth_expired"
         assert (tmp_path / "baseline.json").read_text() == baseline
+        assert (tmp_path / "screenshots" / "baseline.png").read_bytes() == visual_baseline
         handler.expired = False
         handler.content = "Version three"
         assert check(config, tmp_path, browser) == "content_change"

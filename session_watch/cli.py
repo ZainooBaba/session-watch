@@ -26,7 +26,13 @@ def check(config, root, browser):
     baseline = root / "baseline.json"
     before = json.loads(baseline.read_text()) if baseline.exists() else None
     after = browser.capture()
+    visual = None
+    if config.get("screenshots", {}).get("enabled") and not after.get("auth_signals"):
+        from .visual import capture_visual
+        visual = capture_visual(browser, root, config["screenshots"])
     result = decide(before, after, config)
+    if visual:
+        result["visual"] = visual
     if before and result["classification"] not in {"unchanged"}:
         event_id = str(time.time_ns())
         atomic_write(root / "changes" / (event_id + ".json"), json.dumps({
