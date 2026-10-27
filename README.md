@@ -145,3 +145,27 @@ before the watcher stops for human sign-in. Output uses the current system audio
 device and volume, with afplay volume set to 0.8; muted output cannot be overridden.
 Set `login_sound` and `change_sound` to built-in macOS sound names, or disable
 `alerts.enabled` to mute. Other operating systems log that audio is unsupported.
+
+## Persistent alerts and local control panel
+
+Start the supervisor instead of the standalone watcher for repeating sounds:
+
+```sh
+python -m session_watch.control --config config.toml
+```
+
+Open `http://127.0.0.1:8765`. The supervisor starts monitoring and keeps an alert
+sounding every eight seconds until you choose **Silence alert / acknowledge**.
+Login alerts continue even after the watcher stops for sign-in. Acknowledgment
+silences the current alert; a new detected change can trigger another one.
+**Open login browser** pauses monitoring and acknowledges the sound. Complete
+sign-in yourself, then choose **Save session & resume**. **Resume monitoring**
+restarts a paused watcher with saved state.
+
+The control page binds only to loopback, rejects other Host/Origin values, and
+requires a private local token for state changes. Do not expose this server to
+a network. Active alerts survive supervisor restarts. The current tone may finish
+after acknowledgment. If the control service is unavailable, the watcher falls
+back to one sound sequence and logs the failure to establish persistent playback.
+Running the supervisor and a standalone watcher against the same state directory
+at the same time is prevented by the monitor lock.

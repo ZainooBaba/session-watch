@@ -43,7 +43,7 @@ def check(config, root, browser):
         browser.save()
     if result["advance"]:
         atomic_write(baseline, json.dumps(after))
-    alert = play_alert(config, result)
+    alert = play_alert(config, result, root)
     if alert:
         result["audio_alert"] = alert
     emit(root, result)

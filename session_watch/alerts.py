@@ -13,11 +13,26 @@ def alert_kind(result):
     return None
 
 
-def play_alert(config, result):
+def play_alert(config, result, root=None):
     settings = config.get('alerts', {})
     kind = alert_kind(result)
     if not settings.get('enabled', False) or kind is None:
         return None
+    if settings.get('persistent') and root is not None:
+        import json
+        import httpx
+        try:
+            control = json.loads((root / 'control.json').read_text())
+            with httpx.Client(timeout=5, trust_env=False) as client:
+                response = client.post(f"http://127.0.0.1:{int(control['port'])}/event",
+                    headers={'X-Session-Watch-Token': control['token']}, json=result)
+                response.raise_for_status()
+            return {'kind': kind, 'persistent': True, 'queued': True}
+        except (OSError, ValueError, KeyError, httpx.HTTPError):
+            # A one-shot fallback is audible, but explicitly report the missing loop.
+            fallback = play_alert({**config, 'alerts': {**settings, 'persistent': False}}, result)
+            return {**(fallback or {}), 'persistent': False,
+                    'error': 'Control service unavailable; persistent alert was not queued'}
     sound = settings.get('login_sound' if kind == 'login' else 'change_sound',
                          'Basso' if kind == 'login' else 'Glass')
     repeats = 3 if kind == 'login' else 2

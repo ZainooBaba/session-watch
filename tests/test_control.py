@@ -1,0 +1,93 @@
+import json
+import threading
+import time
+from http.server import ThreadingHTTPServer
+from unittest.mock import Mock
+
+import httpx
+import pytest
+from session_watch.control import Controller, handler_for
+
+
+@pytest.fixture
+def controller(tmp_path):
+    config = tmp_path / 'config.toml'
+    config.write_text('[alerts]\nenabled = true\nrepeat_seconds = 0.02\n')
+    return Controller(config)
+
+
+def test_alert_persists_until_acknowledged_and_login_has_priority(controller):
+    controller.notify({'classification': 'content_change'})
+    controller.notify({'classification': 'auth_expired'})
+    controller.notify({'classification': 'content_change'})
+    assert controller.status()['alert']['kind'] == 'login'
+    restored = Controller(controller.path)
+    assert restored.active == controller.active
+    version = controller.active['version']
+    with pytest.raises(ValueError):
+        controller.acknowledge(version - 1)
+    controller.acknowledge(version)
+    assert controller.active is None
+    assert Controller(controller.path).active is None
+    controller.notify({'classification': 'content_change'})
+    assert controller.active['kind'] == 'change'
+
+
+def test_audio_repeats_and_acknowledgment_stops_it(controller, monkeypatch):
+    player = Mock(return_value={'played': True})
+    monkeypatch.setattr('session_watch.control.play_alert', player)
+    controller.notify({'classification': 'auth_expired'})
+    thread = threading.Thread(target=controller.audio_loop, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 1
+    while player.call_count < 3 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert player.call_count >= 3
+    controller.acknowledge()
+    time.sleep(0.03)
+    count = player.call_count
+    time.sleep(0.06)
+    assert player.call_count == count
+    controller.closed.set(); controller.wake.set(); thread.join(timeout=1)
+    assert not thread.is_alive()
+
+
+def test_control_http_rejects_unauthorized_and_cross_origin_writes(controller):
+    server = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(controller, 'secret'))
+    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        with httpx.Client(trust_env=False) as client:
+            assert client.get(url + '/status').status_code == 200
+            assert client.get(url, headers={'Host': 'evil.example'}).status_code == 403
+            assert client.post(url + '/event', json={'classification': 'auth_expired'}).status_code == 403
+            headers = {'X-Session-Watch-Token': 'secret'}
+            assert client.post(url + '/event', headers={**headers, 'Origin': 'https://evil.example'}, json={}).status_code == 403
+            assert client.post(url + '/event', headers=headers, json={'classification': 'auth_expired'}).status_code == 200
+            from session_watch.alerts import play_alert
+            (controller.root / 'control.json').write_text(json.dumps({'port': server.server_port, 'token': 'secret'}))
+            delivery = play_alert({'alerts': {'enabled': True, 'persistent': True}},
+                                  {'classification': 'content_change'}, controller.root)
+            assert delivery['persistent'] and delivery['queued']
+            version = client.get(url + '/status').json()['alert']['version']
+            assert client.post(url + '/acknowledge', headers=headers, json={'version': version}).status_code == 200
+            assert client.get(url + '/status').json()['alert'] is None
+    finally:
+        server.shutdown(); server.server_close(); thread.join()
+
+
+def test_login_action_stops_watch_and_save_resumes(controller, monkeypatch):
+    worker, login = Mock(), Mock()
+    worker.poll.return_value = None
+    login.poll.return_value = None
+    login.wait.return_value = 0
+    controller.worker = worker
+    monkeypatch.setattr(controller, 'spawn', Mock(return_value=login))
+    controller.notify({'classification': 'auth_expired'})
+    controller.begin_login()
+    worker.send_signal.assert_called_once()
+    assert controller.active is None
+    resume = Mock(); monkeypatch.setattr(controller, 'resume', resume)
+    controller.save_login()
+    login.stdin.write.assert_called_once_with(b'\n')
+    resume.assert_called_once()
