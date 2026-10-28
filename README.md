@@ -109,7 +109,7 @@ Unresolved login takes priority. Alert/attention state survives new screenshots,
 
 The page shows the latest screenshot and its capture time in **America/Chicago (Central)**. It polls every two seconds, updating the image only when a new capture is saved. Select the image to open it full size. A paused watcher retains the last successful capture and original timestamp.
 
-The thin white bar along the top of the screenshot drains toward the actual next scheduled capture. It switches to Capturing, Comparing, Checking for invitations, or a paused/sign-in state as appropriate. It does not invent a countdown while stopped.
+The white progress bar in its own dark strip above the screenshot drains toward the actual next scheduled capture. It switches to Capturing, Comparing, Checking for invitations, or a paused/sign-in state as appropriate. It does not invent a countdown while stopped.
 
 The default schedule uses a truncated normal distribution: mean **90 seconds**, standard deviation **15 seconds**, bounds **60–120 seconds**. Out-of-bounds samples are redrawn. Delay begins after a check finishes; loading and LLM inference add to the time between navigation starts. Remove `[refresh]` to use fixed `interval_seconds`.
 
