@@ -87,9 +87,9 @@ function renderAlert(force=false){
 }
 function dismissSelected(){const a=selected();if(a)act('dismiss',{id:a.id,revision:a.revision})}
 function paintCountdown(){
- if(appStopped)return;let fraction=0,text='Monitoring paused';
- if(receivedAt&&Date.now()-receivedAt>10000)text='Connection lost';else if(monitor?.auth_paused||monitor?.login_open)text='Waiting for sign-in';else if(monitor?.monitoring){const t=monitor.timing;if(t?.phase==='waiting'&&t.next_capture_at){const remaining=Math.max(0,t.next_capture_at*1000-(Date.now()+serverOffset));fraction=Math.min(1,remaining/(t.interval_seconds*1000));const seconds=Math.ceil(remaining/1000);text=seconds?(t.last_error?'Retry in ':'Next capture ')+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):'Starting capture…'}else text=t?.phase==='classifying_invite'?'Checking invitation…':t?.phase==='analyzing'?'Comparing capture…':'Capturing…'}
- $('countdown-fill').style.transform='scaleX('+fraction+')';$('capture-progress').setAttribute('aria-valuenow',String(Math.round(fraction*100)));$('capture-progress').setAttribute('aria-valuetext',text);$('countdown-label').textContent=text;
+ if(appStopped)return;let fraction=0,text='Monitoring paused',comparing=false;
+ if(receivedAt&&Date.now()-receivedAt>10000)text='Connection lost';else if(monitor?.auth_paused||monitor?.login_open)text='Waiting for sign-in';else if(monitor?.monitoring){const t=monitor.timing;if(t?.phase==='waiting'&&t.next_capture_at){const remaining=Math.max(0,t.next_capture_at*1000-(Date.now()+serverOffset));fraction=Math.min(1,remaining/(t.interval_seconds*1000));const seconds=Math.ceil(remaining/1000);text=seconds?(t.last_error?'Retry in ':'Next capture ')+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):'Starting capture…'}else{comparing=['analyzing','classifying_invite'].includes(t?.phase);fraction=comparing?1:0;text=t?.phase==='classifying_invite'?'Checking invitation…':t?.phase==='analyzing'?'Comparing capture…':'Capturing…'}}
+ $('countdown-fill').style.backgroundColor=comparing?'#ff6464':'#fff';$('countdown-fill').style.transform='scaleX('+fraction+')';if(comparing)$('capture-progress').removeAttribute('aria-valuenow');else $('capture-progress').setAttribute('aria-valuenow',String(Math.round(fraction*100)));$('capture-progress').setAttribute('aria-valuetext',text);$('countdown-label').textContent=text;
 }
 async function loadReference(){
  const response=await fetch('/reference',{cache:'no-store'});if(!response.ok)return;const data=await response.json();
