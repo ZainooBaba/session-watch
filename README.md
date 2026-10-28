@@ -67,6 +67,12 @@ For headless configuration, `[pager] enabled = true` can use the `PAGERDUTY_ROUT
 
 Each new change alert keeps its own screenshot and highlighted pixel diff. Select **Screenshot** or **Diff** in the alert to view them, and select the image for full size. These images do not change when a later capture arrives. Auth alerts and older alerts without saved images display an availability message.
 
+## Contact and availability
+
+A reference box below the screenshot displays an email field, a masked password field, individual Copy buttons, and a short availability note. Set `SESSION_WATCH_EMAIL` and `SESSION_WATCH_PASSWORD` as process environment variables, or copy `.env.example` to the ignored local `.env` file and set the two quoted values there. Actual credentials are never part of the source or source archive.
+
+The availability text is stored locally in `.session-watch/reference.json` as `availability`. Passwords are available from the local Mac by default; public requests omit the password unless that local file explicitly sets `share_password` to true. The main status API and static page never embed the password.
+
 ## Compact interface
 
 The control page fits the viewport with Home, Dashboard, Alerts, and Setup tabs. Home is the default view: new alerts sit beside a compact screenshot preview, stacking on narrow screens. The screenshot scales to available space. Alerts can be filtered to **New** or **All**, with one alert per page and paginated explanations. **Setup** holds sign-in, sign-out, Stop App, and PagerDuty settings. Auth Needed alerts also offer sign-in directly: opening sign-in silences the sound, while successful verification resolves the alert and removes it from New.

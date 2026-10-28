@@ -19,7 +19,7 @@ from filelock import FileLock
 from .alerts import alert_kind, play_alert
 from .core import atomic_write
 from .panel import PAGE
-from . import pager, alert_store
+from . import pager, alert_store, reference
 from .tunnel import Tunnel
 
 
@@ -344,6 +344,8 @@ def handler_for(controller, token):
                 return self.reply(PAGE.replace('__TOKEN__', token), content_type='text/html; charset=utf-8')
             if parsed.path == '/status':
                 return self.reply(controller.status())
+            if parsed.path == '/reference':
+                return self.reply(reference.values(controller.path, controller.root, include_password=self.local_request()))
             if parsed.path.startswith('/alert-image/'):
                 if (controller.root / 'signed-out').exists():
                     return self.reply({'error': 'Sign in to view alert images'}, 403)
