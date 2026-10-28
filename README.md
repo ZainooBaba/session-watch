@@ -69,7 +69,7 @@ Each new change alert keeps its own screenshot and highlighted pixel diff. Selec
 
 ## Contact and availability
 
-A reference box below the screenshot displays an email field, a masked password field, individual Copy buttons, and a short availability note. Set `SESSION_WATCH_EMAIL` and `SESSION_WATCH_PASSWORD` as process environment variables, or copy `.env.example` to the ignored local `.env` file and set the two quoted values there. Actual credentials are never part of the source or source archive.
+On Home, a reference box below the screenshot displays an email field, a masked password field, individual Copy buttons, and a short availability note. Set `SESSION_WATCH_EMAIL` and `SESSION_WATCH_PASSWORD` as process environment variables, or copy `.env.example` to the ignored local `.env` file and set the two quoted values there. Actual credentials are never part of the source or source archive.
 
 The availability text is stored locally in `.session-watch/reference.json` as `availability`. Passwords are available from the local Mac by default; public requests omit the password unless that local file explicitly sets `share_password` to true. The main status API and static page never embed the password.
 
