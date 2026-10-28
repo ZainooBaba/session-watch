@@ -100,3 +100,21 @@ def test_three_loading_failures_create_one_local_alert_and_success_resets_streak
     for _ in range(3):
         with pytest.raises(DashboardLoadingError):check(CONFIG,tmp_path,browser)
     assert len(alert_store.read(tmp_path))==2
+
+
+def test_framework_only_change_with_identical_screenshot_has_no_model_alert_or_pager(tmp_path,monkeypatch):
+    import io,httpx
+    from PIL import Image
+    image=io.BytesIO();Image.new('RGB',(20,20),'white').save(image,format='PNG')
+    browser=Mock();browser.screenshot.return_value=image.getvalue()
+    model=Mock(side_effect=AssertionError('No LLM call for zero rendered difference'))
+    monkeypatch.setattr(httpx.Client,'post',model)
+    config={'llm':{'model':'test'},'invites':{'enabled':True},'screenshots':{'enabled':True}}
+    browser.capture.return_value=snapshot('<p-button pc22="">No invites yet</p-button>')
+    check(config,tmp_path,browser)
+    browser.capture.return_value=snapshot('<p-button pc30="">No invites yet</p-button>')
+    assert check(config,tmp_path,browser)=='unchanged'
+    model.assert_not_called()
+    assert 'pc30' in json.loads((tmp_path/'baseline.json').read_text())['html']
+    assert not (tmp_path/'alert-inbox.json').exists()
+    assert not list((tmp_path/'pager-outbox').glob('*.json'))

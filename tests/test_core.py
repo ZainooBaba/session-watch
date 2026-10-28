@@ -94,3 +94,30 @@ def test_verified_dashboard_prevents_soft_auth_guess_from_hiding_change(monkeypa
     model(monkeypatch, {'classification':'auth_expired','confidence':.95,'reason':'Might be sign-in'})
     result=classify(page(),page('New invitation',authenticated_verified=True),CONFIG)
     assert result['classification']=='uncertain'
+
+
+def test_no_text_or_pixel_diff_cannot_be_promoted_by_llm():
+    classifier=Mock(side_effect=AssertionError('No model should run'))
+    before=page('<p-button pc22=""><button>All 14</button></p-button>')
+    after=page('<p-button pc30=""><button>All 14</button></p-button>',visual={'classification':'visually_unchanged','changed_pixels':0})
+    result=decide(before,after,CONFIG,classifier)
+    assert result['classification']=='unchanged' and result['advance']
+    classifier.assert_not_called()
+
+
+def test_generated_framework_attributes_are_noise_without_screenshot():
+    classifier=Mock(side_effect=AssertionError('No model should run'))
+    before=page('<main _ngcontent-a="" pc22="">Same</main>')
+    after=page('<main _ngcontent-b="" pc35="">Same</main>')
+    assert decide(before,after,CONFIG,classifier)['classification']=='unchanged'
+
+
+@pytest.mark.parametrize('after',[
+    page('<main>New invitation</main>',visual={'classification':'visually_unchanged'}),
+    page('<main>old</main>',visual={'classification':'visual_change'}),
+    page(auth_signals=['Login expired'],visual={'classification':'visually_unchanged'}),
+])
+def test_real_text_pixel_and_auth_changes_are_not_silenced(after):
+    classifier=Mock(return_value={'classification':'content_change'})
+    decide(page(),after,CONFIG,classifier)
+    classifier.assert_called_once()

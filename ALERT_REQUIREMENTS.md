@@ -100,3 +100,8 @@ Both LLM passes receive explicit diffs; the invitation pass also receives added 
 Keep fingerprints of the last two valid captures (normalized rendered text plus screenshot hash where available). If the next fully loaded capture exactly returns to the state from two captures earlier, classify it as a repeated snapshot and suppress duplicate model checks, alerts, and PagerDuty delivery. Advance the baseline to the returned state. Failed/loading captures never enter this history. New text or a different screenshot does not qualify as an exact repeat.
 
 After three consecutive captures fail readiness because loading has not completed or content remains unstable, create one **Dashboard still loading** alert. It has timestamp and reason, uses Funk, and never queues PagerDuty. Monitoring retries automatically. More failures in the same streak do not create duplicate alerts, even after dismissal. A successful capture resets the counter and allows a later separate episode to alert. The existing alert remains until dismissed.
+
+
+## No visible difference means no dashboard-change alert
+
+Before calling either LLM, compare rendered text and the screenshot result. If both are unchanged, classify the capture as unchanged and create no alert, sound, or PagerDuty event. Raw HTML changes alone cannot override this rule. Independently ignore generated PrimeNG `pcNN` attributes and Angular component-instance attributes when deciding whether markup changed. Keep the original HTML in diagnostic snapshots; advance the baseline silently when only metadata changes. Authentication failures still take priority, and a real text change or screenshot change must remain eligible for classification. The invitation pass must not run after this unchanged decision.

@@ -119,4 +119,5 @@ class Browser:
                 raise DashboardLoadingError('Dashboard is still loading or changing; capture skipped and previous baseline retained.') from None
         return {"loading": False, "url": self.page.url, "status": status, "auth_signals": signals,
                 "authenticated_verified": bool(auth and not signals),
-                "html": normalized(self.page.content(), self.config)}
+                "html": normalized(self.page.content(), self.config),
+                "rendered_text": self.page.locator("body").inner_text()}

@@ -92,7 +92,7 @@ def page_text(snapshot, config):
 
 
 def candidate(before, after, config, stage_one, visual):
-    if not before or after.get('auth_signals') or stage_one['classification'] in {'auth_expired', 'repeat_snapshot'}:
+    if not before or after.get('auth_signals') or stage_one['classification'] in {'auth_expired', 'repeat_snapshot', 'unchanged'}:
         return False
     return (page_text(before, config) != page_text(after, config)
             or (visual or {}).get('classification') == 'visual_change'

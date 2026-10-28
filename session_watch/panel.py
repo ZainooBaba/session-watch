@@ -67,7 +67,7 @@ function renderAlert(force=false){
  $('alert-card').hidden=!a;$('alert-empty').hidden=!!a;$('alert-empty').querySelector('h3').textContent=activeTab==='home'||filter==='new'?'No new alerts':'No alerts yet';
  const index=items.findIndex(i=>i.id===a?.id);$('alert-position').textContent=a?(index+1)+' of '+items.length: '0 alerts';$('alert-prev').disabled=busy||index<=0;$('alert-next').disabled=busy||index>=items.length-1;
  if(!a)return;
- $('alert-card').dataset.category=a.category;$('alert-card').dataset.status=a.status;$('alert-title').textContent=titles[a.category]||'Alert';$('alert-time').textContent=centralTime(a.created_at);$('alert-time').dateTime=a.created_at;
+ $('alert-card').dataset.category=a.category;$('alert-card').dataset.status=a.status;$('alert-title').textContent=a.feedback?.classification==='false_positive'?'Dismissed false alert':titles[a.category]||'Alert';$('alert-time').textContent=centralTime(a.created_at);$('alert-time').dateTime=a.created_at;
  $('alert-dismiss').hidden=a.status!=='open';$('alert-dismiss').disabled=busy;
  $('alert-signin').hidden=a.category!=='auth_needed'||!monitor?.auth_paused;$('alert-signin').textContent=monitor?.session?.label||'Sign in';$('alert-signin').disabled=busy;
  if(['auth_needed','loading_stalled'].includes(a.category))detail='overview';for(const n of ['overview','stage1','stage2','after','diff']){$('detail-'+n).hidden=(['auth_needed','loading_stalled'].includes(a.category)&&n!=='overview');$('detail-'+n).setAttribute('aria-selected',String(n===detail))}
