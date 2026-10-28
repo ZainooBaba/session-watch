@@ -70,3 +70,41 @@ def test_unexplained_pixel_change_cannot_be_ruled_out_by_text_model(monkeypatch)
     mock_model(monkeypatch,verdict('not_interview_invite',.99,''))
     old=snapshot('Same text')
     assert classify_invite(old,old,CONFIG,{'classification':'visual_change'})['classification']=='possible_invite'
+
+
+def thalamus(invites, interviews=''):
+    return snapshot('<thal-dashboard-invites>'+invites+'</thal-dashboard-invites><thal-dashboard-events>'+interviews+'</thal-dashboard-events>')
+
+
+def test_empty_invites_rejects_scheduled_row_hallucination(monkeypatch):
+    quote='Example Residency 1st Interview Mon Nov 16 Scheduled Not published'
+    mock_model(monkeypatch,verdict(quote=quote))
+    before=thalamus('<div aria-busy="true">Loading invites</div>', '<div id="dashboard-interviews-loading-container">Loading</div>')
+    after=thalamus('Invites No invites yet',quote)
+    result=classify_invite(before,after,CONFIG,{'classification':'visual_change'})
+    assert result['classification']=='not_interview_invite'
+    assert 'No invites yet' in result['reason']
+
+
+def test_unchanged_invites_rejects_changes_elsewhere(monkeypatch):
+    mock_model(monkeypatch,verdict())
+    before=thalamus('Existing invitation from Example Residency','Scheduled table one')
+    after=thalamus('Existing invitation from Example Residency','Scheduled table two')
+    assert classify_invite(before,after,CONFIG)['classification']=='not_interview_invite'
+
+
+def test_new_invite_panel_gets_focused_diff_and_remains_confirmable(monkeypatch):
+    response=Mock();response.json.return_value={'message':{'content':json.dumps(verdict())}}
+    post=Mock(return_value=response);monkeypatch.setattr(httpx.Client,'post',post)
+    before=thalamus('No invites yet','Old scheduled event')
+    after=thalamus('New invitation from Example Residency','Old scheduled event')
+    result=classify_invite(before,after,CONFIG)
+    assert result['classification']=='interview_invite'
+    payload=json.loads(post.call_args.kwargs['json']['messages'][1]['content'])
+    assert payload['comparison_scope']=='invites_panel'
+    assert 'New invitation' in payload['added_text']
+    assert 'No invites yet' in payload['removed_text']
+    assert 'Old scheduled event' not in payload['current_text']
+    choices=post.call_args.kwargs['json']['format']['properties']['evidence']['enum']
+    assert 'New invitation from Example Residency' in choices
+    assert '' in choices

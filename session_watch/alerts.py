@@ -5,6 +5,10 @@ from pathlib import Path
 
 
 def alert_kind(result, invite_only=False):
+    if result.get('classification') == 'repeat_snapshot':
+        return None
+    if result.get('classification') == 'loading_stalled':
+        return 'loading'
     if result.get('classification') == 'auth_expired':
         return 'login'
     if result.get('invite', {}).get('classification') in {'interview_invite', 'possible_invite'}:
@@ -39,11 +43,11 @@ def play_alert(config, result, root=None):
             fallback = play_alert({**config, 'alerts': {**settings, 'persistent': False}}, result)
             return {**(fallback or {}), 'persistent': False,
                     'error': 'Control service unavailable; persistent alert was not queued'}
-    category = result.get('alert_category') or ('auth_needed' if kind == 'login' else
+    category = result.get('alert_category') or ('auth_needed' if kind == 'login' else 'loading_stalled' if kind == 'loading' else
         'interview_invite' if result.get('classification') == 'content_change' and result.get('invite', {}).get('classification') == 'interview_invite' else
         'review_needed' if result.get('invite', {}).get('classification') in {'possible_invite', 'interview_invite'} else 'change')
     defaults = {'auth_needed': ('login_sound', 'Basso', 3), 'change': ('change_sound', 'Glass', 2),
-                'review_needed': ('review_sound', 'Ping', 2), 'interview_invite': ('invite_sound', 'Hero', 3)}
+                'loading_stalled': ('loading_sound', 'Funk', 2), 'review_needed': ('review_sound', 'Ping', 2), 'interview_invite': ('invite_sound', 'Hero', 3)}
     key, default, repeats = defaults.get(category, defaults['change'])
     sound = settings.get(key, default)
     volume = settings.get('volume', 1.0)

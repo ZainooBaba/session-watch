@@ -15,6 +15,10 @@ RESTORE_SESSION = """data => {
 }"""
 
 
+class DashboardLoadingError(RuntimeError):
+    pass
+
+
 class Browser:
     def __init__(self, config: dict, root: Path, headed: bool = False):
         self.config, self.root, self.headed = config, root, headed
@@ -87,6 +91,32 @@ class Browser:
         ready = self.config.get("ready_selector")
         if ready and not signals:
             self.page.locator(ready).first.wait_for(state="visible")
-        return {"url": self.page.url, "status": status, "auth_signals": signals,
+        if not signals:
+            # Authentication can be ready while the dashboard's data is still loading.
+            selector = self.config.get('loading_selector', '[aria-busy="true"], [id$="-loading-container"]')
+            stable_ms = self.config.get('content_stable_ms', 1000)
+            self.page.evaluate("() => { window.__sessionWatchContent = null; }")
+            try:
+                self.page.wait_for_function("""({selector, stableMs}) => {
+                  const busy = [...document.querySelectorAll(selector)].some(el => {
+                    const style = getComputedStyle(el);
+                    return el.getClientRects().length && style.display !== 'none' && style.visibility !== 'hidden';
+                  });
+                  if (busy) { window.__sessionWatchContent = null; return false; }
+                  const text = document.body.innerText;
+                  const previous = window.__sessionWatchContent;
+                  if (!previous || previous.text !== text) {
+                    window.__sessionWatchContent = {text, since: performance.now()};
+                    return stableMs === 0;
+                  }
+                  return performance.now() - previous.since >= stableMs;
+                }""", arg={'selector': selector, 'stableMs': stable_ms},
+                    timeout=self.config.get('navigation_timeout_ms', 30000))
+            except Exception as exc:
+                from playwright.sync_api import TimeoutError
+                if not isinstance(exc, TimeoutError):
+                    raise
+                raise DashboardLoadingError('Dashboard is still loading or changing; capture skipped and previous baseline retained.') from None
+        return {"loading": False, "url": self.page.url, "status": status, "auth_signals": signals,
                 "authenticated_verified": bool(auth and not signals),
                 "html": normalized(self.page.content(), self.config)}

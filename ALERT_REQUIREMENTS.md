@@ -89,3 +89,14 @@ Objects are written to private local files independently of sound playback or an
 Setup provides Start Tunnel / Stop Tunnel for one app-owned `cloudflared tunnel --url` process. Starting an already running tunnel does not create another process. Stop closes the current tunnel, and stopping Session Watch also closes it. Unrelated system tunnels are left alone. Status distinguishes starting, running, stopped, and failed startup, with the private access link when available.
 
 The plain tunnel URL provides public read/write access to the full app, as requested. No private-link handshake or access cookie is required. Anyone who has the link can view screenshots and alerts and use Setup and alert actions. The UI labels it as a public share link and offers Open and Copy controls. Writes require the action token supplied by the public page and a matching Origin; unrelated websites cannot submit actions using only an embedded form. Remote clients cannot submit monitor events. Stopping the tunnel removes remote access. Alert image routes accept only fixed filenames and validated alert IDs and remain unavailable when signed out.
+
+
+## False-invite prevention and repeated snapshots
+
+A capture must finish loading and keep its rendered text stable before HTML, screenshots, or invitation comparisons are accepted. Visible busy indicators and loading containers cause the watcher to wait; timing out skips the capture without advancing either baseline. If a historical baseline was incomplete, replace it with a complete baseline rather than treating scheduled events finishing loading as new invites.
+
+Both LLM passes receive explicit diffs; the invitation pass also receives added and removed text. On Thalamus, the invitation evidence is scoped to the Invites panel. Existing scheduled, completed, or waitlisted rows in Interviews do not qualify. A fully loaded panel explicitly stating “No invites yet” or an unchanged loaded Invites panel prevents a model hallucination from generating an invite alert.
+
+Keep fingerprints of the last two valid captures (normalized rendered text plus screenshot hash where available). If the next fully loaded capture exactly returns to the state from two captures earlier, classify it as a repeated snapshot and suppress duplicate model checks, alerts, and PagerDuty delivery. Advance the baseline to the returned state. Failed/loading captures never enter this history. New text or a different screenshot does not qualify as an exact repeat.
+
+After three consecutive captures fail readiness because loading has not completed or content remains unstable, create one **Dashboard still loading** alert. It has timestamp and reason, uses Funk, and never queues PagerDuty. Monitoring retries automatically. More failures in the same streak do not create duplicate alerts, even after dismissal. A successful capture resets the counter and allows a later separate episode to alert. The existing alert remains until dismissed.

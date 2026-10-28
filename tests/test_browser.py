@@ -46,7 +46,7 @@ def test_saved_login_content_change_and_expiry(website, tmp_path, monkeypatch):
     import httpx
     from unittest.mock import Mock
     origin, handler = website
-    config = {"url": origin + "/account", "settle_ms": 0, "navigation_timeout_ms": 500,
+    config = {"url": origin + "/account", "settle_ms": 0, "content_stable_ms": 0, "navigation_timeout_ms": 500,
               "authenticated_selector": "#account", "login_url_patterns": ["/login"],
               "llm": {"model": "test"}, "screenshots": {"enabled": True}}
     response = Mock()
@@ -79,3 +79,22 @@ def test_saved_login_content_change_and_expiry(website, tmp_path, monkeypatch):
         handler.content = "Version three"
         assert check(config, tmp_path, browser) == "content_change"
         assert "Version three" in (tmp_path / "baseline.json").read_text()
+
+
+def test_capture_waits_for_dashboard_data_to_finish_loading(website,tmp_path):
+    origin,handler=website
+    handler.content='<div aria-busy="true">Loading</div><script>setTimeout(()=>{document.querySelector("#account").innerHTML="Loaded dashboard"},250)</script>'
+    config={'url':origin+'/account','settle_ms':0,'content_stable_ms':0,'navigation_timeout_ms':1500,'authenticated_selector':'#account'}
+    with Browser(config,tmp_path) as browser:
+        browser.context.add_cookies([{'name':'session','value':'valid','url':origin}])
+        result=browser.capture()
+        assert 'Loaded dashboard' in result['html'] and not result['loading']
+
+
+def test_forever_loading_is_capture_failure_not_new_invite(website,tmp_path):
+    origin,handler=website;handler.content='<div aria-busy="true">Loading</div>'
+    config={'url':origin+'/account','settle_ms':0,'content_stable_ms':0,'navigation_timeout_ms':200,'authenticated_selector':'#account'}
+    with Browser(config,tmp_path) as browser:
+        browser.context.add_cookies([{'name':'session','value':'valid','url':origin}])
+        with pytest.raises(RuntimeError,match='still loading'):
+            browser.capture()

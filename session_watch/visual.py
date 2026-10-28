@@ -1,5 +1,6 @@
 """Local pixel comparison; screenshots are never sent to the text-only LLM."""
 import io
+import hashlib
 import time
 from PIL import Image, ImageChops, ImageDraw
 from .core import atomic_write
@@ -38,7 +39,8 @@ def capture_visual(browser, root, settings):
     if not baseline.exists():
         atomic_write_bytes(baseline, current)
         atomic_write_bytes(folder / 'latest.png', current)
-        return {'classification': 'visual_baseline_created', 'image': str(baseline)}
+        return {'classification': 'visual_baseline_created', 'image': str(baseline),
+                'image_sha256': hashlib.sha256(current).hexdigest()}
     before = baseline.read_bytes()
     atomic_write_bytes(folder / 'previous.png', before)
     atomic_write_bytes(folder / 'latest.png', current)
@@ -52,6 +54,7 @@ def capture_visual(browser, root, settings):
         atomic_write_bytes(change / 'diff.png', (folder / 'latest-diff.png').read_bytes())
         result['artifact_directory'] = str(change)
     atomic_write_bytes(baseline, current)
+    result['image_sha256'] = hashlib.sha256(current).hexdigest()
     return result
 
 

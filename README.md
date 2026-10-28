@@ -8,12 +8,13 @@ The detailed behavior and acceptance criteria are in [Alert requirements](ALERT_
 
 ## How the two checks work
 
-1. Playwright reloads the dashboard with saved authentication. Identical HTML and screenshots require no LLM call.
+1. Playwright reloads the dashboard with saved authentication, waits for visible loading indicators to disappear, and requires stable rendered text. Loading/unstable captures retain the previous baseline. After three consecutive failures, one local **Dashboard still loading** alert appears; it never pages. A healthy capture resets the streak. Identical HTML and screenshots require no LLM call.
 2. **Change check:** a local Ollama model distinguishes dashboard changes, expired authentication, and uncertainty. Configured login URLs/elements, HTTP 401/403, and a missing authenticated selector take priority. A model's unsupported login guess cannot override a verified authenticated dashboard.
-3. **Invitation check:** a separate structured LLM call compares the old and new dashboard text and focused diff. It returns `interview_invite`, `possible_invite`, or `not_interview_invite`, with confidence, explanation, and a quote when available. Both passes can use the same local model; `[invites.llm]` optionally overrides settings for pass two.
+3. **Invitation check:** a separate structured LLM call receives before/after text, an explicit diff, added text, and removed text. On the Thalamus redesign it compares the **Invites panel**, separately from scheduled/completed Interviews rows. A loaded “No invites yet” panel or unchanged Invites panel cannot be turned into a new-invite claim by the model. It returns `interview_invite`, `possible_invite`, or `not_interview_invite`, with confidence, explanation, and a quote when available. Both passes can use the same local model; `[invites.llm]` optionally overrides settings for pass two.
 4. Meaningful text or screenshot changes still reach pass two when pass one is uncertain. A confident non-invitation result keeps the confirmed-change alert local; it does not erase or dismiss it. An increasing total/pending invitation counter or an unexplained screenshot-only change is kept as a possible invitation even if the text model tries to rule it out.
 5. PagerDuty requires pass one to return `content_change` and pass two to return `interview_invite`. Confirmed new invitations require a verifiable new text quote. An unverifiable claim is downgraded to **possible**, which still alerts locally but never pages. Failed/invalid/offline pass-two responses also become possible local alerts. Routine invisible script/token changes do not page you.
-6. The control page displays both decisions, reasons, and quoted evidence. An active alert's review stays pinned while later screenshots arrive. Alert cards retain both model classifications, confidence, returned explanations, and evidence. These are the model’s returned explanations, not hidden internal reasoning.
+6. An A → B → A check compares fully loaded captures using normalized rendered text and the screenshot hash (when screenshots are enabled). An exact return to the state from two checks earlier advances the baseline without another model call, alert, or PagerDuty event. Loading captures never enter this history.
+7. The control page displays both decisions, reasons, and quoted evidence. An active alert's review stays pinned while later screenshots arrive. Alert cards retain both model classifications, confidence, returned explanations, and evidence. These are the model’s returned explanations, not hidden internal reasoning.
 
 The text-only model cannot interpret image pixels. Screenshot-only differences can therefore produce possible-invite false positives, including layout/font noise. This is intentional under the recall-first policy. Classification is probabilistic and does not guarantee every invitation will be detected.
 
@@ -91,6 +92,7 @@ Confirmed dashboard changes create alerts even when the second check rules out a
 - **Glass twice:** confirmed dashboard change.
 - **Ping twice:** possible invitation or a change needing review.
 - **Hero three times:** confirmed new interview invitation. PagerDuty still requires both checks to pass.
+- **Funk twice:** three consecutive captures failed to finish loading; local only.
 
 When several types are open, their sounds rotate. Auth Needed takes priority while the session is paused.
 
@@ -135,6 +137,8 @@ The footer offers two controls with explanations before confirmation:
 - `events.jsonl`: timestamped monitor decisions and local alert results.
 - `changes/`: redacted old/new excerpts, focused diffs, and verdicts.
 - `alert-inbox.json`: private alert objects, model explanations, review history, and dismissal timestamps.
+- `recent-snapshots.json`: fingerprints of the last two valid captures for A → B → A suppression.
+- `capture-health.json`: consecutive loading failures and their alert episode.
 - `auth-required.json`: persistent sign-in pause; dismissing an alert does not clear it.
 - `screenshots/`: latest/previous/diff PNGs and timestamped visual changes.
 - `latest-analysis.json`, `active-alert.json`, `attention.json`: review and latched alert state.

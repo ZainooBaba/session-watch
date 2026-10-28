@@ -2,6 +2,8 @@ url = "https://example.com/account"
 interval_seconds = 60
 settle_ms = 1500
 navigation_timeout_ms = 30000
+content_stable_ms = 1000
+# loading_selector = '[aria-busy="true"], [id$="-loading-container"]'
 # Set a stable selector that appears on the fully rendered monitored page.
 # ready_selector = "main"
 # Strongly recommended: element visible ONLY while authenticated.
@@ -41,6 +43,7 @@ login_sound = "Basso"
 change_sound = "Glass"
 review_sound = "Ping"
 invite_sound = "Hero"
+loading_sound = "Funk"
 
 [invites]
 enabled = true

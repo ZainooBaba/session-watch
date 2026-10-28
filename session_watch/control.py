@@ -175,7 +175,7 @@ class Controller:
                 self.set_attention('login')
                 raise ValueError('Login was not confirmed. Open the login browser and try again.')
             if (self.root / 'signed-out').exists():
-                for name in ['baseline.json', 'latest-analysis.json', 'screenshots/baseline.png', 'screenshots/latest.png',
+                for name in ['baseline.json', 'recent-snapshots.json', 'capture-health.json', 'latest-analysis.json', 'screenshots/baseline.png', 'screenshots/latest.png',
                              'screenshots/previous.png', 'screenshots/latest-diff.png']:
                     (self.root / name).unlink(missing_ok=True)
                 (self.root / 'signed-out').unlink()
@@ -292,6 +292,8 @@ class Controller:
             changed = (self.active and self.active['kind'] == 'change') or (self.attention and self.attention['kind'] == 'change')
             if needs_login:
                 indicator = {'state': 'action', 'label': 'Sign-in needed'}
+            elif self.active and self.active.get('category') == 'loading_stalled':
+                indicator = {'state': 'action', 'label': 'Dashboard still loading'}
             elif changed:
                 invite_type = (self.active or self.attention or {}).get('invite_classification')
                 label = 'Interview invite' if invite_type == 'interview_invite' else 'Possible invite' if invite_type == 'possible_invite' else 'Change alert'

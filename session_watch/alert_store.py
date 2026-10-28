@@ -24,10 +24,11 @@ def record(root, result):
     stage1 = result.get('stage1') or {k: result[k] for k in ('classification', 'confidence', 'reason') if k in result}
     stage2 = result.get('invite') or {'classification': 'not_run', 'reason': 'Invitation check has not run.'}
     auth = result.get('classification') == 'auth_expired'
+    stalled = result.get('classification') == 'loading_stalled'
     passed = stage1.get('classification') == 'content_change'
     confirmed = passed and stage2.get('classification') == 'interview_invite'
     possible = stage2.get('classification') in {'possible_invite', 'interview_invite'}
-    if not (auth or passed or possible):
+    if not (auth or stalled or passed or possible):
         return None
     with FileLock(str(root / 'alert-inbox.lock'), timeout=5):
         records = read(root)
@@ -44,7 +45,7 @@ def record(root, result):
         if item and item['stage1'] == stage1 and item['stage2'] == stage2 and item.get('pager_event_id') == result.get('pager_event_id') and item.get('checking_invite', False) == result.get('checking_invite', False):
             return event_id
         stamp = now()
-        category = 'auth_needed' if auth else 'interview_invite' if confirmed else 'change' if passed else 'review_needed'
+        category = 'auth_needed' if auth else 'loading_stalled' if stalled else 'interview_invite' if confirmed else 'change' if passed else 'review_needed'
         if item is None:
             item = {'id': event_id, 'created_at': stamp, 'status': 'open', 'dismissed_at': None,
                     'revision': 0, 'history': []}

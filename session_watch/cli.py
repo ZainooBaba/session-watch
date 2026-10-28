@@ -9,9 +9,9 @@ import time
 import tomllib
 
 from filelock import FileLock, Timeout
-from .browser import Browser
+from .browser import Browser, DashboardLoadingError
 from .alerts import play_alert
-from .core import atomic_write, decide, evidence
+from .core import atomic_write, decide, evidence, digest
 from .schedule import next_interval, validate_schedule
 from . import invites, pager, alert_store
 
@@ -29,11 +29,38 @@ def monitor_state(root, phase, **values):
         'phase': phase, 'pid': os.getpid(), 'updated_at': time.time(), **values}))
 
 
+def record_loading_failure(config, root, reason):
+    path = root / 'capture-health.json'
+    state = json.loads(path.read_text()) if path.exists() else {'consecutive_loading': 0}
+    state['consecutive_loading'] += 1
+    state['last_reason'] = reason
+    if state['consecutive_loading'] >= 3 and not state.get('alert_id'):
+        result = {'alert_id': 'loading-' + str(time.time_ns()), 'classification': 'loading_stalled',
+                  'confidence': 1, 'reason': 'Three consecutive captures could not finish loading. Monitoring will retry; no PagerDuty notification is sent.',
+                  'invite': {'classification': 'not_run', 'confidence': None,
+                             'reason': 'The dashboard must finish loading before invitation checks can run.', 'program': '', 'evidence': ''}}
+        state['alert_id'] = alert_store.record(root, result)
+        play_alert(config, result, root)
+    atomic_write(path, json.dumps(state))
+
+
 def check(config, root, browser):
     baseline = root / "baseline.json"
     before = json.loads(baseline.read_text()) if baseline.exists() else None
     monitor_state(root, "capturing")
-    after = browser.capture()
+    try:
+        after = browser.capture()
+    except DashboardLoadingError as exc:
+        record_loading_failure(config, root, str(exc))
+        raise
+    recovered_baseline = bool(before and invites.loading(before) and not after.get('auth_signals'))
+    if not after.get('auth_signals') and invites.loading(after):
+        reason = 'Dashboard is still loading; capture skipped and previous baseline retained.'
+        record_loading_failure(config, root, reason)
+        raise DashboardLoadingError(reason)
+    atomic_write(root / 'capture-health.json', json.dumps({'consecutive_loading': 0}))
+    if recovered_baseline:
+        before = None
     after["captured_at"] = datetime.now(timezone.utc).isoformat()
     visual = None
     if config.get("screenshots", {}).get("enabled") and not after.get("auth_signals"):
@@ -41,8 +68,19 @@ def check(config, root, browser):
         visual = capture_visual(browser, root, config["screenshots"])
     if visual:
         after["visual"] = visual
+    history_path = root / 'recent-snapshots.json'
+    history = []
+    if history_path.exists() and not recovered_baseline:
+        history = json.loads(history_path.read_text())
+    snapshot_key = digest(invites.page_text(after, config) + '\n' + (visual or {}).get('image_sha256', ''))
+    repeat = bool(before and not after.get('auth_signals') and len(history) >= 2
+                  and history[-2]['key'] == snapshot_key and history[-1]['key'] != snapshot_key)
     monitor_state(root, "analyzing")
-    result = decide(before, after, config)
+    result = ({'classification': 'repeat_snapshot', 'confidence': 1, 'advance': True,
+               'reason': 'This fully loaded snapshot matches the one from two checks ago (A → B → A). Repeated state; no new alert or PagerDuty notification.'}
+              if repeat else decide(before, after, config))
+    if recovered_baseline and result['classification'] == 'baseline_created':
+        result['reason'] = 'Replaced an incomplete loading baseline with a fully loaded dashboard. Existing rows are not new invites.'
     if visual:
         result["visual"] = visual
     result["captured_at"] = after["captured_at"]
@@ -82,6 +120,8 @@ def check(config, root, browser):
         browser.save()
     if result["advance"]:
         atomic_write(baseline, json.dumps(after))
+    if not after.get('auth_signals'):
+        atomic_write(history_path, json.dumps((history + [{'key': snapshot_key, 'captured_at': after['captured_at']}])[-2:]))
     alert = play_alert(config, result, root)
     if alert:
         result["audio_alert"] = alert
